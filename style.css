@@ -478,4 +478,23 @@ tr:hover{
     break-inside:avoid;
     box-shadow:none;
   }
+.table-wrap{
+  overflow:auto;
+}
+
+.signature{
+  position: fixed;
+  right: 18px;
+  bottom: 10px;
+  color: #64748b;
+  font-size: 11px;
+  letter-spacing: .3px;
+  opacity: .75;
+  z-index: 999;
+  transition: .2s;
+}
+
+.signature:hover{
+  opacity: 1;
+  color: #cbd5e1;
 }
