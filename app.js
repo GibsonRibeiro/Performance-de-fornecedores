@@ -159,9 +159,11 @@ function optionList(values, label){
   }).join("");
 }
 
-function kpi(label, value, color){
+function kpi(label, value, color, action = ""){
+  const clickable = action ? `onclick="${action}" style="cursor:pointer"` : "";
+
   return `
-    <div class="kpi">
+    <div class="kpi" ${clickable}>
       <small>${label}</small>
       <strong class="${color}">${value}</strong>
     </div>
@@ -239,6 +241,14 @@ function getFilterValue(id){
   return el ? el.value : "";
 }
 
+function setFilterValue(id, value){
+  const el = document.getElementById(id);
+  if(!el) return;
+
+  el.value = value;
+  el.dispatchEvent(new Event("change"));
+}
+
 /* =========================
    DASHBOARD GERAL
 ========================= */
@@ -269,6 +279,12 @@ function mapGeralRows(rows){
   })).filter(x => x.fornecedor || x.pedido);
 }
 
+async function ensureGeralData(){
+  if(!geralData.length){
+    geralData = mapGeralRows(await loadCSV(FILES.geral));
+  }
+}
+
 async function renderGeral(){
   app.innerHTML = `
     <section class="hero">
@@ -278,10 +294,7 @@ async function renderGeral(){
   `;
 
   try{
-    if(!geralData.length){
-      geralData = mapGeralRows(await loadCSV(FILES.geral));
-    }
-
+    await ensureGeralData();
     renderGeralView(geralData);
   } catch(error){
     console.error("Erro Dashboard Geral:", error);
@@ -331,6 +344,17 @@ function filterGeral(base){
       (!pedido || norm(x.pedido).includes(pedido)) &&
       (!faixa || x.faixa === faixa);
   });
+}
+
+function aplicarFiltroGeralFaixa(faixa){
+  setFilterValue("geralFaixa", faixa);
+}
+
+function limparFiltrosGeral(){
+  setFilterValue("geralComprador", "");
+  setFilterValue("geralFornecedor", "");
+  setFilterValue("geralPedido", "");
+  setFilterValue("geralFaixa", "");
 }
 
 function renderGeralContent(base){
@@ -388,12 +412,12 @@ function renderGeralContent(base){
 
   content.innerHTML = `
     <section class="kpis">
-      ${kpi("Registros filtrados", data.length, "blue")}
-      ${kpi("Atrasados", atrasados, "red")}
-      ${kpi("Crítico", criticos, "orange")}
-      ${kpi("Alerta", alerta, "yellow")}
-      ${kpi("Dentro do prazo", dentro, "green")}
-      ${kpi("Entregues", entregues, "blue")}
+      ${kpi("Registros filtrados", data.length, "blue", "limparFiltrosGeral()")}
+      ${kpi("Atrasados", atrasados, "red", "aplicarFiltroGeralFaixa('Atrasado')")}
+      ${kpi("Crítico", criticos, "orange", "aplicarFiltroGeralFaixa('Crítico')")}
+      ${kpi("Alerta", alerta, "yellow", "aplicarFiltroGeralFaixa('Alerta')")}
+      ${kpi("Dentro do prazo", dentro, "green", "aplicarFiltroGeralFaixa('Dentro do prazo')")}
+      ${kpi("Entregues", entregues, "blue", "aplicarFiltroGeralFaixa('Entregue')")}
       ${kpi("Total comprado", money(totalComprado), "blue")}
       ${kpi("Entregues no prazo", `${perfEntrega}%`, "green")}
     </section>
@@ -477,13 +501,42 @@ function perfText(perf){
   return perf === null ? "Sem medição" : `${perf}%`;
 }
 
-function classificarFornecedorAutomatico(fornecedor, valor, performance){
+function contarPedidosPorFornecedor(baseGeral){
+  const mapa = {};
+
+  baseGeral.forEach(item => {
+    const fornecedor = norm(item.fornecedor);
+    const pedido = norm(item.pedido);
+
+    if(!fornecedor || !pedido) return;
+
+    if(!mapa[fornecedor]){
+      mapa[fornecedor] = new Set();
+    }
+
+    mapa[fornecedor].add(pedido);
+  });
+
+  const resultado = {};
+
+  Object.keys(mapa).forEach(fornecedor => {
+    resultado[fornecedor] = mapa[fornecedor].size;
+  });
+
+  return resultado;
+}
+
+function classificarFornecedorAutomatico(fornecedor, valor, performance, pedidos){
   const nome = norm(fornecedor);
 
   const ehEstrategico = FORNECEDORES_ESTRATEGICOS_FIXOS.some(item => norm(item) === nome);
 
   if(ehEstrategico){
     return "Estratégico";
+  }
+
+  if(pedidos <= 1){
+    return "Não crítico";
   }
 
   if(performance !== null && performance >= 60 && valor >= 100000){
@@ -497,11 +550,12 @@ function classificarFornecedorAutomatico(fornecedor, valor, performance){
   return "Gargalo";
 }
 
-function mapFornecedoresRows(rows){
+function mapFornecedoresRows(rows, pedidosPorFornecedor){
   return rows.map(r => {
     const fornecedor = get(r, ["Descrição Fornecedor", "Fornecedor"]);
     const valor = numberBR(get(r, ["Valor total", "Valor"]));
     const performance = parsePercent(get(r, ["Performance de entrega", "Performance"]));
+    const pedidos = pedidosPorFornecedor[norm(fornecedor)] || 0;
 
     return {
       fornecedor,
@@ -510,7 +564,8 @@ function mapFornecedoresRows(rows){
       comprador: get(r, ["Comprador"]),
       plano: get(r, ["Plano de ação", "Plano"]),
       performance,
-      situacao: classificarFornecedorAutomatico(fornecedor, valor, performance)
+      pedidos,
+      situacao: classificarFornecedorAutomatico(fornecedor, valor, performance, pedidos)
     };
   }).filter(x => x.fornecedor);
 }
@@ -524,7 +579,11 @@ async function renderFornecedores(){
   `;
 
   try{
-    fornecedoresData = mapFornecedoresRows(await loadCSV(FILES.fornecedores));
+    await ensureGeralData();
+
+    const pedidosPorFornecedor = contarPedidosPorFornecedor(geralData);
+    fornecedoresData = mapFornecedoresRows(await loadCSV(FILES.fornecedores), pedidosPorFornecedor);
+
     renderFornecedoresView(fornecedoresData);
   } catch(error){
     console.error("Erro Ranking Fornecedores:", error);
@@ -546,20 +605,22 @@ function renderFornecedoresView(base){
   app.innerHTML = `
     <section class="hero">
       <h1>Ranking de Fornecedores / Matriz Kraljic</h1>
-      <p>Classificação automática: estratégicos fixos, alavancáveis por valor/performance, não críticos e gargalos.</p>
+      <p>Classificação automática: estratégicos fixos, compra única como não crítico, alavancáveis por valor/performance e gargalos.</p>
     </section>
 
     ${renderFilterBar([
       {type:"select", id:"fornComprador", label:"Todos compradores", options:compradores},
       {type:"select", id:"fornFornecedor", label:"Todos fornecedores", options:fornecedores},
       {type:"select", id:"fornSituacao", label:"Todas situações", options:situacoes},
+      {type:"select", id:"fornPlano", label:"Todos planos", options:["Com plano", "Sem plano"]},
+      {type:"select", id:"fornPerf", label:"Todas performances", options:["Sem medição", "Boa ≥ 85%", "Alerta 60% a 84%", "Crítica < 60%"]},
       {type:"text", id:"fornBusca", placeholder:"Buscar fornecedor ou plano de ação"}
     ])}
 
     <div id="fornecedoresContent"></div>
   `;
 
-  attachFilterEvents(["fornComprador","fornFornecedor","fornSituacao","fornBusca"], () => renderFornecedoresContent(base));
+  attachFilterEvents(["fornComprador","fornFornecedor","fornSituacao","fornPlano","fornPerf","fornBusca"], () => renderFornecedoresContent(base));
   renderFornecedoresContent(base);
 }
 
@@ -567,16 +628,53 @@ function filterFornecedores(base){
   const comprador = getFilterValue("fornComprador");
   const fornecedor = getFilterValue("fornFornecedor");
   const situacao = getFilterValue("fornSituacao");
+  const plano = getFilterValue("fornPlano");
+  const perf = getFilterValue("fornPerf");
   const busca = norm(getFilterValue("fornBusca"));
 
   return base.filter(x => {
     const fullText = norm(`${x.fornecedor} ${x.plano} ${x.comprador} ${x.situacao}`);
 
+    const passaPlano =
+      !plano ||
+      (plano === "Com plano" && !!x.plano) ||
+      (plano === "Sem plano" && !x.plano);
+
+    const passaPerf =
+      !perf ||
+      (perf === "Sem medição" && x.performance === null) ||
+      (perf === "Boa ≥ 85%" && x.performance !== null && x.performance >= 85) ||
+      (perf === "Alerta 60% a 84%" && x.performance !== null && x.performance >= 60 && x.performance < 85) ||
+      (perf === "Crítica < 60%" && x.performance !== null && x.performance < 60);
+
     return (!comprador || x.comprador === comprador) &&
       (!fornecedor || x.fornecedor === fornecedor) &&
       (!situacao || x.situacao === situacao) &&
+      passaPlano &&
+      passaPerf &&
       (!busca || fullText.includes(busca));
   }).sort((a,b) => a.classificacao - b.classificacao);
+}
+
+function aplicarFiltroFornecedorSituacao(situacao){
+  setFilterValue("fornSituacao", situacao);
+}
+
+function aplicarFiltroFornecedorPlano(valor){
+  setFilterValue("fornPlano", valor);
+}
+
+function aplicarFiltroFornecedorPerf(valor){
+  setFilterValue("fornPerf", valor);
+}
+
+function limparFiltrosFornecedores(){
+  setFilterValue("fornComprador", "");
+  setFilterValue("fornFornecedor", "");
+  setFilterValue("fornSituacao", "");
+  setFilterValue("fornPlano", "");
+  setFilterValue("fornPerf", "");
+  setFilterValue("fornBusca", "");
 }
 
 function renderFornecedoresContent(base){
@@ -588,14 +686,14 @@ function renderFornecedoresContent(base){
 
   content.innerHTML = `
     <section class="kpis">
-      ${kpi("Fornecedores", data.length, "blue")}
+      ${kpi("Fornecedores", data.length, "blue", "limparFiltrosFornecedores()")}
       ${kpi("Valor total", money(total), "blue")}
-      ${kpi("Estratégicos", data.filter(x => x.situacao === "Estratégico").length, "green")}
-      ${kpi("Alavancáveis", data.filter(x => x.situacao === "Alavancável").length, "blue")}
-      ${kpi("Gargalos", data.filter(x => x.situacao === "Gargalo").length, "red")}
-      ${kpi("Não críticos", data.filter(x => x.situacao === "Não crítico").length, "orange")}
-      ${kpi("Com plano", data.filter(x => x.plano).length, "yellow")}
-      ${kpi("Sem medição", data.filter(x => x.performance === null).length, "orange")}
+      ${kpi("Estratégicos", data.filter(x => x.situacao === "Estratégico").length, "green", "aplicarFiltroFornecedorSituacao('Estratégico')")}
+      ${kpi("Alavancáveis", data.filter(x => x.situacao === "Alavancável").length, "blue", "aplicarFiltroFornecedorSituacao('Alavancável')")}
+      ${kpi("Gargalos", data.filter(x => x.situacao === "Gargalo").length, "red", "aplicarFiltroFornecedorSituacao('Gargalo')")}
+      ${kpi("Não críticos", data.filter(x => x.situacao === "Não crítico").length, "orange", "aplicarFiltroFornecedorSituacao('Não crítico')")}
+      ${kpi("Com plano", data.filter(x => x.plano).length, "yellow", "aplicarFiltroFornecedorPlano('Com plano')")}
+      ${kpi("Sem medição", data.filter(x => x.performance === null).length, "orange", "aplicarFiltroFornecedorPerf('Sem medição')")}
     </section>
 
     <section class="matrix">
@@ -616,6 +714,10 @@ function renderFornecedoresContent(base){
                   <div class="row">
                     <span>Entrega</span>
                     <span class="${perfColor(x.performance)}">${perfText(x.performance)}</span>
+                  </div>
+                  <div class="row">
+                    <span>Pedidos</span>
+                    <b>${x.pedidos}</b>
                   </div>
                   ${x.plano ? `<div class="row"><b class="yellow">${x.plano}</b></div>` : ""}
                 </div>
@@ -730,6 +832,18 @@ function statusClassSaving(status){
   return "badge-gray";
 }
 
+function aplicarFiltroSavingStatus(status){
+  setFilterValue("savingStatus", status);
+}
+
+function limparFiltrosSaving(){
+  setFilterValue("savingComprador", "");
+  setFilterValue("savingStatus", "");
+  setFilterValue("savingFornecedor", "");
+  setFilterValue("savingVencedor", "");
+  setFilterValue("savingBusca", "");
+}
+
 function renderSavingContent(base){
   const data = filterSaving(base);
   const content = document.getElementById("savingContent");
@@ -767,13 +881,13 @@ function renderSavingContent(base){
 
   content.innerHTML = `
     <section class="kpis">
-      ${kpi("Processos", data.length, "blue")}
+      ${kpi("Processos", data.length, "blue", "limparFiltrosSaving()")}
       ${kpi("Saving total", money(totalSaving), totalSaving >= 0 ? "green" : "red")}
       ${kpi("Saving mensal", money(savingMensal), savingMensal >= 0 ? "green" : "red")}
       ${kpi("Saving %", `${percentualSaving}%`, percentualSaving >= 0 ? "green" : "red")}
-      ${kpi("Homologado", money(savingHomologado), "green")}
-      ${kpi("Pipeline", money(savingPipeline), "orange")}
-      ${kpi("Declinado", money(savingDeclinado), "red")}
+      ${kpi("Homologado", money(savingHomologado), "green", "aplicarFiltroSavingStatus('Homologado')")}
+      ${kpi("Pipeline", money(savingPipeline), "orange", "aplicarFiltroSavingStatus('Homologação em curso')")}
+      ${kpi("Declinado", money(savingDeclinado), "red", "aplicarFiltroSavingStatus('Declinado')")}
       ${kpi("Custo referência", money(custoReferencia), "blue")}
     </section>
 
