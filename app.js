@@ -11,6 +11,29 @@ let savingData = [];
 const app = document.getElementById("app");
 
 /* =========================
+   FORNECEDORES ESTRATÉGICOS FIXOS
+========================= */
+
+const FORNECEDORES_ESTRATEGICOS_FIXOS = [
+  "IBERO INDUSTRIA BRASILEIRA DE EQUIP. RODOV. S A",
+  "SAF-HOLLAND DO BRASIL IND PROD EIXOS E EQUIP",
+  "COMPANHIA BRASILEIRA DE ALUMINIO",
+  "PRE-FABRICAR CONSTRUCOES LTDA",
+  "WEG TINTAS LTDA",
+  "SINALSUL INDUSTRIA DE AUTO PECAS LTDA",
+  "MADEIRAS EULIDE LTDA",
+  "DAHER ACO INDUSTRIAL LTDA.",
+  "FRAGON PRESTADORA DE SERVICOS E COMERCIO DE MATERIAIS DE CON",
+  "ZF AUTOMOTIVE BRASIL LTDA",
+  "RDR METAIS INDUSTRIAIS LTDA",
+  "FIX IMPLEMENTOS RODOVIARIOS COMERCIO E SERVICOS LTDA",
+  "AUSTRALIS LUMBER",
+  "PERFILLINE COMPONENTES METALICOS LTDA",
+  "BAUMANN IND E COM DE ACOS LTDA",
+  "METALURGICA SCHILD LTDA"
+];
+
+/* =========================
    UTILITÁRIOS
 ========================= */
 
@@ -329,11 +352,6 @@ function renderGeralContent(base){
     ? Math.round((entreguesNoPrazo / entreguesData.length) * 100)
     : 0;
 
-  const prazos = data.map(x => x.prazoPagamento).filter(x => x > 0);
-  const prazoMedio = prazos.length
-    ? Math.round(prazos.reduce((a,b) => a + b, 0) / prazos.length)
-    : 0;
-
   const porComprador = group(data, "comprador");
 
   const porFaixa = [
@@ -459,16 +477,42 @@ function perfText(perf){
   return perf === null ? "Sem medição" : `${perf}%`;
 }
 
+function classificarFornecedorAutomatico(fornecedor, valor, performance){
+  const nome = norm(fornecedor);
+
+  const ehEstrategico = FORNECEDORES_ESTRATEGICOS_FIXOS.some(item => norm(item) === nome);
+
+  if(ehEstrategico){
+    return "Estratégico";
+  }
+
+  if(performance !== null && performance >= 60 && valor >= 100000){
+    return "Alavancável";
+  }
+
+  if(performance !== null && performance >= 60 && valor < 100000){
+    return "Não crítico";
+  }
+
+  return "Gargalo";
+}
+
 function mapFornecedoresRows(rows){
-  return rows.map(r => ({
-    fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
-    valor: numberBR(get(r, ["Valor total", "Valor"])),
-    classificacao: Number(get(r, ["Classificação", "Ranking"])) || 0,
-    comprador: get(r, ["Comprador"]),
-    plano: get(r, ["Plano de ação", "Plano"]),
-    performance: parsePercent(get(r, ["Performance de entrega", "Performance"])),
-    situacao: get(r, ["Situação", "Situacao"])
-  })).filter(x => x.fornecedor);
+  return rows.map(r => {
+    const fornecedor = get(r, ["Descrição Fornecedor", "Fornecedor"]);
+    const valor = numberBR(get(r, ["Valor total", "Valor"]));
+    const performance = parsePercent(get(r, ["Performance de entrega", "Performance"]));
+
+    return {
+      fornecedor,
+      valor,
+      classificacao: Number(get(r, ["Classificação", "Ranking"])) || 0,
+      comprador: get(r, ["Comprador"]),
+      plano: get(r, ["Plano de ação", "Plano"]),
+      performance,
+      situacao: classificarFornecedorAutomatico(fornecedor, valor, performance)
+    };
+  }).filter(x => x.fornecedor);
 }
 
 async function renderFornecedores(){
@@ -480,10 +524,7 @@ async function renderFornecedores(){
   `;
 
   try{
-    if(!fornecedoresData.length){
-      fornecedoresData = mapFornecedoresRows(await loadCSV(FILES.fornecedores));
-    }
-
+    fornecedoresData = mapFornecedoresRows(await loadCSV(FILES.fornecedores));
     renderFornecedoresView(fornecedoresData);
   } catch(error){
     console.error("Erro Ranking Fornecedores:", error);
@@ -505,7 +546,7 @@ function renderFornecedoresView(base){
   app.innerHTML = `
     <section class="hero">
       <h1>Ranking de Fornecedores / Matriz Kraljic</h1>
-      <p>Classificação estratégica, performance de entrega e planos de ação por fornecedor.</p>
+      <p>Classificação automática: estratégicos fixos, alavancáveis por valor/performance, não críticos e gargalos.</p>
     </section>
 
     ${renderFilterBar([
@@ -598,18 +639,9 @@ function mapSavingRows(rows){
     comprador: get(r, ["Comprador", "Nome Comprador"]),
     codigo: get(r, ["Código", "Codigo"]),
     descricao: get(r, ["Descrição", "Descriçao", "Descricao"]),
-    consumoMensal: numberBR(get(r, ["Consumo Mensal"])),
-    um: get(r, ["UM"]),
     fornecedorAtual: get(r, ["Fornecedor Atual"]),
-    precoAtual: numberBR(get(r, ["Preco Atual Unitario", "Preço Atual Unitario", "Preço Atual Unitário"])),
-    competidorA: get(r, ["Competidor A"]),
-    precoCompetidorA: numberBR(get(r, ["Preço Competidor A", "Preco Competidor A"])),
-    competidorB: get(r, ["Competidor B"]),
-    precoCompetidorB: numberBR(get(r, ["Preço Competidor B", "Preco Competidor B"])),
     vencedor: get(r, ["Vencedor"]),
-    precoVencedor: numberBR(get(r, ["Preco Vencedor", "Preço Vencedor"])),
     status: get(r, ["Status"]),
-    savingUnitario: numberBR(get(r, ["Saving Unitario", "Saving Unitário"])),
     savingMensal: numberBR(get(r, ["Saving Mensal"])),
     savingTotal: numberBR(get(r, ["Saving Total"])),
     reducaoPercentual: parsePercent(get(r, ["Reducao Percentual", "Redução Percentual"])),
@@ -639,10 +671,6 @@ async function renderSaving(){
         <h1>Ranking de Saving</h1>
         <p>Erro ao carregar o arquivo <b>data/saving.csv</b>. Veja o Console com F12.</p>
       </section>
-
-      <div class="notice">
-        Confira se o arquivo <b>saving.csv</b> foi enviado dentro da pasta <b>data</b> no GitHub.
-      </div>
     `;
   }
 }
@@ -670,11 +698,7 @@ function renderSavingView(base){
     <div id="savingContent"></div>
   `;
 
-  attachFilterEvents(
-    ["savingComprador","savingStatus","savingFornecedor","savingVencedor","savingBusca"],
-    () => renderSavingContent(base)
-  );
-
+  attachFilterEvents(["savingComprador","savingStatus","savingFornecedor","savingVencedor","savingBusca"], () => renderSavingContent(base));
   renderSavingContent(base);
 }
 
@@ -726,14 +750,6 @@ function renderSavingContent(base){
     ? Math.round((totalSaving / custoReferencia) * 100)
     : 0;
 
-  const porStatus = Object.values(group(data, "status"))
-    .map(g => ({
-      nome:g.nome,
-      qtd:g.items.length,
-      valor:g.items.reduce((sum,x) => sum + x.savingTotal, 0)
-    }))
-    .sort((a,b) => b.valor - a.valor);
-
   const porComprador = Object.values(group(data, "comprador"))
     .map(g => ({
       nome:g.nome,
@@ -742,26 +758,12 @@ function renderSavingContent(base){
     }))
     .sort((a,b) => b.valor - a.valor);
 
-  const percentualPorComprador = porComprador
-    .map(x => ({
-      nome:x.nome,
-      percentual:x.custo > 0 ? Math.round((x.valor / x.custo) * 100) : 0
-    }))
-    .sort((a,b) => b.percentual - a.percentual);
-
   const topSavings = [...data]
     .sort((a,b) => b.savingTotal - a.savingTotal)
     .slice(0, 10);
 
-  const topNegativos = [...data]
-    .filter(x => x.savingTotal < 0)
-    .sort((a,b) => a.savingTotal - b.savingTotal)
-    .slice(0, 5);
-
-  const maxComprador = Math.max(...porComprador.map(x => x.valor), 1);
-  const maxStatus = Math.max(...porStatus.map(x => Math.abs(x.valor)), 1);
-  const maxTop = Math.max(...topSavings.map(x => x.savingTotal), 1);
-  const maxPercent = Math.max(...percentualPorComprador.map(x => x.percentual), 1);
+  const maxComprador = Math.max(...porComprador.map(x => Math.abs(x.valor)), 1);
+  const maxTop = Math.max(...topSavings.map(x => Math.abs(x.savingTotal)), 1);
 
   content.innerHTML = `
     <section class="kpis">
@@ -782,27 +784,10 @@ function renderSavingContent(base){
       </div>
 
       <div class="panel">
-        <h2>Saving percentual por comprador</h2>
-        ${percentualPorComprador.map(x => barLine(x.nome, Math.abs(x.percentual), x.percentual >= 0 ? "bar-blue" : "bar-red", `${x.percentual}%`, maxPercent)).join("")}
-      </div>
-
-      <div class="panel">
-        <h2>Status dos processos</h2>
-        ${porStatus.map(x => barLine(x.nome, Math.abs(x.valor), "bar-green", `${x.qtd} | ${money(x.valor)}`, maxStatus)).join("")}
-      </div>
-
-      <div class="panel">
         <h2>Top savings</h2>
-        ${topSavings.map(x => barLine(x.descricao || x.codigo || "Item", x.savingTotal, "bar-red", money(x.savingTotal), maxTop)).join("")}
+        ${topSavings.map(x => barLine(x.descricao || x.codigo || "Item", Math.abs(x.savingTotal), x.savingTotal >= 0 ? "bar-red" : "bar-orange", money(x.savingTotal), maxTop)).join("")}
       </div>
     </section>
-
-    ${topNegativos.length ? `
-      <section class="panel" style="margin-bottom:22px;">
-        <h2>Itens com saving negativo</h2>
-        ${topNegativos.map(x => barLine(x.descricao || x.codigo || "Item", Math.abs(x.savingTotal), "bar-red", money(x.savingTotal), Math.abs(topNegativos[0]?.savingTotal || 1))).join("")}
-      </section>
-    ` : ""}
 
     <section class="table-wrap">
       <table>
