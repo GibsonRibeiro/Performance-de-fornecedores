@@ -71,6 +71,40 @@ function parsePercent(text){
   return Number.isFinite(number) ? number : null;
 }
 
+function parseDateBR(text){
+  const raw = String(text || "").trim();
+
+  if(!raw) return null;
+
+  const parts = raw.split(/[\/\-]/);
+
+  if(parts.length < 3) return null;
+
+  let day = Number(parts[0]);
+  let month = Number(parts[1]);
+  let year = Number(parts[2]);
+
+  if(year < 100) year += 2000;
+
+  if(!day || !month || !year) return null;
+
+  return new Date(year, month - 1, day);
+}
+
+function monthKeyFromDate(date){
+  if(!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,"0")}`;
+}
+
+function monthLabel(key){
+  if(!key) return "";
+
+  const [year, month] = key.split("-");
+  const nomes = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+  return `${nomes[Number(month) - 1]}/${year}`;
+}
+
 function parseCSV(text){
   const firstLine = text.split(/\r?\n/)[0] || "";
   const delimiter = firstLine.includes(";") ? ";" : ",";
@@ -266,17 +300,23 @@ function faixaClass(faixa){
 }
 
 function mapGeralRows(rows){
-  return rows.map(r => ({
-    pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido"]),
-    fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
-    comprador: get(r, ["Nome Comprador", "Comprador"]),
-    faixa: get(r, ["Faixa de risco", "Faixa Risco", "Risco"]),
-    valor: numberBR(get(r, ["Valor total do pedido", "Valor total", "Valor Pedido", "Valor"])),
-    atraso: numberBR(get(r, ["Entregas com atraso", "Dias atraso", "Atraso"])),
-    dataRecebimento: get(r, ["Data Recebimentos", "Data Recebimento", "Recebimento"]),
-    entradaPrevista: get(r, ["Entrada prevista", "Previsão entrega", "Previsao entrega"]),
-    prazoPagamento: numberBR(get(r, ["média de dias", "Média de dias", "Prazo Médio Pagamento", "Prazo médio pagamento"]))
-  })).filter(x => x.fornecedor || x.pedido);
+  return rows.map(r => {
+    const dataRecebimento = get(r, ["Data Recebimentos", "Data Recebimento", "Recebimento"]);
+    const dataObj = parseDateBR(dataRecebimento);
+
+    return {
+      pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido"]),
+      fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
+      comprador: get(r, ["Nome Comprador", "Comprador"]),
+      faixa: get(r, ["Faixa de risco", "Faixa Risco", "Risco"]),
+      valor: numberBR(get(r, ["Valor total do pedido", "Valor total", "Valor Pedido", "Valor"])),
+      atraso: numberBR(get(r, ["Entregas com atraso", "Dias atraso", "Atraso"])),
+      dataRecebimento,
+      mesRecebimento: monthKeyFromDate(dataObj),
+      entradaPrevista: get(r, ["Entrada prevista", "Previsão entrega", "Previsao entrega"]),
+      prazoPagamento: numberBR(get(r, ["média de dias", "Média de dias", "Prazo Médio Pagamento", "Prazo médio pagamento"]))
+    };
+  }).filter(x => x.fornecedor || x.pedido);
 }
 
 async function ensureGeralData(){
@@ -311,24 +351,26 @@ function renderGeralView(base){
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
   const faixas = uniqueOptions(base, "faixa");
+  const meses = uniqueOptions(base.filter(x => x.mesRecebimento), "mesRecebimento");
 
   app.innerHTML = `
     <section class="hero">
       <h1>Dashboard Geral</h1>
-      <p>Indicadores de pedidos, entregas, risco e performance operacional.</p>
+      <p>Indicadores de pedidos, entregas, risco, performance operacional e recebimentos mensais.</p>
     </section>
 
     ${renderFilterBar([
       {type:"select", id:"geralComprador", label:"Todos compradores", options:compradores},
       {type:"select", id:"geralFornecedor", label:"Todos fornecedores", options:fornecedores},
       {type:"text", id:"geralPedido", placeholder:"Buscar por número do pedido"},
-      {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas}
+      {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas},
+      {type:"select", id:"geralMes", label:"Todos meses recebidos", options:meses}
     ])}
 
     <div id="geralContent"></div>
   `;
 
-  attachFilterEvents(["geralComprador","geralFornecedor","geralPedido","geralFaixa"], () => renderGeralContent(base));
+  attachFilterEvents(["geralComprador","geralFornecedor","geralPedido","geralFaixa","geralMes"], () => renderGeralContent(base));
   renderGeralContent(base);
 }
 
@@ -337,12 +379,14 @@ function filterGeral(base){
   const fornecedor = getFilterValue("geralFornecedor");
   const pedido = norm(getFilterValue("geralPedido"));
   const faixa = getFilterValue("geralFaixa");
+  const mes = getFilterValue("geralMes");
 
   return base.filter(x => {
     return (!comprador || x.comprador === comprador) &&
       (!fornecedor || x.fornecedor === fornecedor) &&
       (!pedido || norm(x.pedido).includes(pedido)) &&
-      (!faixa || x.faixa === faixa);
+      (!faixa || x.faixa === faixa) &&
+      (!mes || x.mesRecebimento === mes);
   });
 }
 
@@ -350,11 +394,16 @@ function aplicarFiltroGeralFaixa(faixa){
   setFilterValue("geralFaixa", faixa);
 }
 
+function aplicarFiltroGeralMes(mes){
+  setFilterValue("geralMes", mes);
+}
+
 function limparFiltrosGeral(){
   setFilterValue("geralComprador", "");
   setFilterValue("geralFornecedor", "");
   setFilterValue("geralPedido", "");
   setFilterValue("geralFaixa", "");
+  setFilterValue("geralMes", "");
 }
 
 function renderGeralContent(base){
@@ -410,6 +459,17 @@ function renderGeralContent(base){
     }))
     .sort((a,b) => b.valor - a.valor);
 
+  const recebidosPorMes = Object.values(group(data.filter(x => x.mesRecebimento), "mesRecebimento"))
+    .map(g => ({
+      mes: g.nome,
+      label: monthLabel(g.nome),
+      valor: g.items.reduce((sum,x) => sum + x.valor, 0)
+    }))
+    .sort((a,b) => a.mes.localeCompare(b.mes));
+
+  const maxMes = Math.max(...recebidosPorMes.map(x => x.valor), 1);
+  const mesAtivo = getFilterValue("geralMes");
+
   content.innerHTML = `
     <section class="kpis">
       ${kpi("Registros filtrados", data.length, "blue", "limparFiltrosGeral()")}
@@ -444,6 +504,20 @@ function renderGeralContent(base){
       </div>
     </section>
 
+    <section class="panel" style="margin-bottom:22px;">
+      <h2>Total recebido por mês</h2>
+
+      <div class="month-chart">
+        ${recebidosPorMes.map(x => `
+          <div class="month-bar ${mesAtivo === x.mes ? "active" : ""}" onclick="aplicarFiltroGeralMes('${x.mes}')">
+            <div class="month-bar-value">${money(x.valor)}</div>
+            <div class="month-bar-fill" style="height:${Math.max(18,(x.valor / maxMes) * 210)}px"></div>
+            <div class="month-bar-label">${x.label}</div>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+
     <section class="table-wrap">
       <table>
         <thead>
@@ -454,6 +528,7 @@ function renderGeralContent(base){
             <th>Valor</th>
             <th>Faixa</th>
             <th>Atraso</th>
+            <th>Data recebimento</th>
             <th>Entrada prevista</th>
           </tr>
         </thead>
@@ -467,6 +542,7 @@ function renderGeralContent(base){
               <td>${money(x.valor)}</td>
               <td><span class="badge ${faixaClass(x.faixa)}">${x.faixa || "—"}</span></td>
               <td>${x.atraso}</td>
+              <td>${x.dataRecebimento || "—"}</td>
               <td>${x.entradaPrevista || "—"}</td>
             </tr>
           `).join("")}
