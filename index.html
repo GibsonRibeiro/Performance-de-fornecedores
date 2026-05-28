@@ -3,36 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <title>Portal Estratégico de Compras</title>
-
+  <title>Portal Performance de Compras — Linshalm</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-
   <header class="topbar">
-
-    <img
-      src="logo-linshalm.png"
-      alt="Linshalm"
-      class="logo"
-    />
+    <img src="logo-linshalm.png" alt="Linshalm" class="logo" />
 
     <nav class="menu">
-      <button class="nav-btn active" data-page="geral">
-        Dashboard Geral
-      </button>
-
-      <button class="nav-btn" data-page="fornecedores">
-        Ranking Fornecedores
-      </button>
-
-      <button class="nav-btn" data-page="saving">
-        Ranking Saving
-      </button>
+      <button class="nav-btn active" data-page="geral">Dashboard Geral</button>
+      <button class="nav-btn" data-page="fornecedores">Ranking Fornecedores</button>
+      <button class="nav-btn" data-page="saving">Ranking Saving</button>
+      <button class="nav-btn danger-btn" onclick="gerarRelatorioAtencao()">Imprimir pedidos em atenção</button>
     </nav>
-
   </header>
 
   <main id="app"></main>
@@ -42,6 +26,5 @@
   </footer>
 
   <script src="app.js"></script>
-
 </body>
 </html>
