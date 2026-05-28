@@ -10,9 +10,7 @@ body{
   font-family:Arial,Helvetica,sans-serif;
 }
 
-/* =========================
-   TOPO
-========================= */
+/* TOPO */
 
 .topbar{
   background:#020202;
@@ -59,17 +57,13 @@ body{
   color:white;
 }
 
-/* =========================
-   MAIN
-========================= */
+/* MAIN */
 
 main{
   padding:28px;
 }
 
-/* =========================
-   HERO
-========================= */
+/* HERO */
 
 .hero{
   background:linear-gradient(135deg,#111827,#020617);
@@ -89,13 +83,11 @@ main{
   line-height:1.6;
 }
 
-/* =========================
-   FILTROS
-========================= */
+/* FILTROS */
 
 .filters{
   display:grid;
-  grid-template-columns:repeat(4,1fr);
+  grid-template-columns:repeat(5,1fr);
   gap:12px;
   margin:0 0 22px 0;
   background:#020617;
@@ -122,9 +114,7 @@ main{
   box-shadow:0 0 0 2px rgba(239,68,68,.25);
 }
 
-/* =========================
-   KPI
-========================= */
+/* KPI */
 
 .kpis{
   display:grid;
@@ -162,9 +152,7 @@ main{
   line-height:1.2;
 }
 
-/* =========================
-   CORES
-========================= */
+/* CORES */
 
 .red{color:#ff1f1f}
 .orange{color:#fb923c}
@@ -172,9 +160,7 @@ main{
 .green{color:#22c55e}
 .blue{color:#38bdf8}
 
-/* =========================
-   PAINÉIS
-========================= */
+/* PAINÉIS */
 
 .panel-grid{
   display:grid;
@@ -196,9 +182,7 @@ main{
   margin-bottom:16px;
 }
 
-/* =========================
-   BARRAS
-========================= */
+/* BARRAS HORIZONTAIS */
 
 .bar-row{
   display:grid;
@@ -227,9 +211,59 @@ main{
 .bar-green{background:#16a34a}
 .bar-blue{background:#0ea5e9}
 
-/* =========================
-   TABELAS
-========================= */
+/* GRÁFICO MENSAL */
+
+.month-chart{
+  display:flex;
+  align-items:flex-end;
+  gap:14px;
+  min-height:280px;
+  padding:24px 10px 8px;
+  overflow-x:auto;
+}
+
+.month-bar{
+  flex:1;
+  min-width:90px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  cursor:pointer;
+}
+
+.month-bar-value{
+  font-size:12px;
+  color:#e5e7eb;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+.month-bar-fill{
+  width:56px;
+  background:linear-gradient(180deg,#22c55e,#0ea5e9);
+  border-radius:12px 12px 4px 4px;
+  box-shadow:0 0 18px rgba(14,165,233,.25);
+  transition:.2s;
+}
+
+.month-bar:hover .month-bar-fill{
+  transform:translateY(-5px);
+  filter:brightness(1.25);
+}
+
+.month-bar-label{
+  font-size:12px;
+  color:#94a3b8;
+  font-weight:700;
+}
+
+.month-bar.active .month-bar-fill{
+  background:linear-gradient(180deg,#ef4444,#dc2626);
+}
+
+/* TABELAS */
 
 .table-wrap{
   max-height:700px;
@@ -267,9 +301,7 @@ tr:hover{
   background:#111827;
 }
 
-/* =========================
-   BADGES
-========================= */
+/* BADGES */
 
 .badge{
   display:inline-block;
@@ -309,9 +341,7 @@ tr:hover{
   color:#e5e7eb;
 }
 
-/* =========================
-   MATRIZ KRALJIC
-========================= */
+/* MATRIZ KRALJIC */
 
 .matrix{
   display:grid;
@@ -377,9 +407,7 @@ tr:hover{
   background:linear-gradient(135deg,#374151,#111827);
 }
 
-/* =========================
-   NOTICE
-========================= */
+/* NOTICE */
 
 .notice{
   background:#111827;
@@ -390,13 +418,34 @@ tr:hover{
   line-height:1.8;
 }
 
-/* =========================
-   RESPONSIVO
-========================= */
+/* ASSINATURA */
+
+.signature{
+  position:fixed;
+  right:18px;
+  bottom:10px;
+  color:#64748b;
+  font-size:11px;
+  letter-spacing:.3px;
+  opacity:.75;
+  z-index:999;
+  transition:.2s;
+}
+
+.signature:hover{
+  opacity:1;
+  color:#cbd5e1;
+}
+
+/* RESPONSIVO */
 
 @media(max-width:1600px){
   .kpis{
     grid-template-columns:repeat(4,1fr);
+  }
+
+  .filters{
+    grid-template-columns:repeat(3,1fr);
   }
 }
 
@@ -455,9 +504,7 @@ tr:hover{
   }
 }
 
-/* =========================
-   PRINT
-========================= */
+/* PRINT */
 
 @media print{
 
@@ -467,7 +514,8 @@ tr:hover{
   }
 
   .topbar,
-  .filters{
+  .filters,
+  .signature{
     display:none;
   }
 
@@ -478,68 +526,4 @@ tr:hover{
     break-inside:avoid;
     box-shadow:none;
   }
-.table-wrap{
-  overflow:auto;
-}
-
-.signature{
-  position: fixed;
-  right: 18px;
-  bottom: 10px;
-  color: #64748b;
-  font-size: 11px;
-  letter-spacing: .3px;
-  opacity: .75;
-  z-index: 999;
-  transition: .2s;
-}
-
-.signature:hover{
-  opacity: 1;
-  color: #cbd5e1;
-}
-.month-chart{
-  display:flex;
-  align-items:end;
-  gap:12px;
-  min-height:260px;
-  padding-top:20px;
-}
-
-.month-bar{
-  flex:1;
-  min-width:52px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:8px;
-  cursor:pointer;
-}
-
-.month-bar-value{
-  font-size:11px;
-  color:#cbd5e1;
-  white-space:nowrap;
-}
-
-.month-bar-fill{
-  width:100%;
-  max-width:60px;
-  background:linear-gradient(180deg,#22c55e,#0ea5e9);
-  border-radius:10px 10px 3px 3px;
-  transition:.2s;
-}
-
-.month-bar:hover .month-bar-fill{
-  transform:translateY(-4px);
-  filter:brightness(1.25);
-}
-
-.month-bar-label{
-  font-size:12px;
-  color:#94a3b8;
-}
-
-.month-bar.active .month-bar-fill{
-  background:linear-gradient(180deg,#ef4444,#dc2626);
 }
