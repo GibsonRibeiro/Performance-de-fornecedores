@@ -131,38 +131,43 @@ main{
 
 .kpis{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
-  gap:12px;
-  margin-bottom:22px;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:16px;
+  margin-bottom:28px;
 }
 
 .kpi{
   background:#020617;
-  border:1px solid #475569;
+  border:1px solid #334155;
   border-radius:18px;
-  padding:16px;
-  min-height:100px;
-  transition:.2s;
+  padding:22px;
+  min-height:115px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  transition:.25s;
 }
 
 .kpi:hover{
-  transform:translateY(-2px);
+  transform:translateY(-4px);
   border-color:#64748b;
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
 }
 
 .kpi small{
-  color:#cbd5e1;
+  color:#94a3b8;
   font-weight:700;
   font-size:11px;
+  letter-spacing:.8px;
   text-transform:uppercase;
-  line-height:1.4;
+  margin-bottom:10px;
 }
 
 .kpi strong{
   display:block;
-  margin-top:10px;
-  font-size:26px;
-  line-height:1.2;
+  font-size:22px;
+  font-weight:800;
+  line-height:1.1;
   white-space:normal;
   overflow-wrap:anywhere;
 }
