@@ -10,6 +10,60 @@ let savingData = [];
 
 const app = document.getElementById("app");
 
+const CONDICOES_PAGAMENTO = {
+  "6": 28,
+  "2": 7,
+  "91": 49,
+  "14": 45,
+  "45": 52.5,
+  "136": 59,
+  "12": 42,
+  "9": 35,
+  "19": 45,
+  "31": 28,
+  "105": 30,
+  "26": 42,
+  "23": 60,
+  "17": 37.5,
+  "28": 56,
+  "10": 45,
+  "39": 60,
+  "29": 75,
+  "8": 45,
+  "7": 30,
+  "20": 35,
+  "30": 42,
+  "11": 35,
+  "3": 10,
+  "84": 42,
+  "4": 14,
+  "5": 21,
+  "153": 50,
+  "106": 35,
+  "52": 0,
+  "32": 31.5,
+  "82": 15,
+  "53": 0,
+  "24": 0,
+  "67": 5,
+  "56": 17.5,
+  "85": 31.5,
+  "99": 22.5,
+  "122": 105,
+  "47": 0,
+  "152": 48,
+  "151": 60,
+  "150": 15,
+  "88": 90,
+  "137": 38.5,
+  "155": 37.5,
+  "16": 70,
+  "21": 28,
+  "156": 75,
+  "154": 64,
+  "149": 21
+};
+
 const FORNECEDORES_ESTRATEGICOS_FIXOS = [
   "IBERO INDUSTRIA BRASILEIRA DE EQUIP. RODOV. S A",
   "SAF-HOLLAND DO BRASIL IND PROD EIXOS E EQUIP",
@@ -67,21 +121,17 @@ function numberBR(text){
 
 function parsePercent(text){
   const value = String(text || "").replace("%","").trim();
-
   if(value === "") return null;
 
   const number = Number(value.replace(",","."));
-
   return Number.isFinite(number) ? number : null;
 }
 
 function parseDateBR(text){
   const raw = String(text || "").trim();
-
   if(!raw) return null;
 
   const parts = raw.split(/[\/\-]/);
-
   if(parts.length < 3) return null;
 
   let day = Number(parts[0]);
@@ -95,15 +145,32 @@ function parseDateBR(text){
   return new Date(year, month - 1, day);
 }
 
-function daysUntil(date){
+function normalizeDate(date){
   if(!date) return null;
-
-  const today = new Date();
-  today.setHours(0,0,0,0);
-
   const d = new Date(date);
   d.setHours(0,0,0,0);
+  return d;
+}
 
+function addDays(date, days){
+  if(!date) return null;
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function diffDays(dateA, dateB){
+  const a = normalizeDate(dateA);
+  const b = normalizeDate(dateB);
+  if(!a || !b) return null;
+  return Math.round((a - b) / 86400000);
+}
+
+function daysUntil(date){
+  if(!date) return null;
+  const today = normalizeDate(new Date());
+  const d = normalizeDate(date);
   return Math.ceil((d - today) / 86400000);
 }
 
@@ -121,10 +188,8 @@ function monthKeyFromDate(date){
 
 function monthLabel(key){
   if(!key) return "";
-
   const [year, month] = key.split("-");
   const nomes = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-
   return `${nomes[Number(month) - 1]}/${year}`;
 }
 
@@ -156,7 +221,6 @@ function parseCSV(text){
         row = [];
         field = "";
       }
-
       if(char === "\r" && next === "\n") i++;
     } else {
       field += char;
@@ -171,29 +235,27 @@ function parseCSV(text){
   return rows.filter(r => r.some(c => String(c).trim() !== ""));
 }
 
-async function loadCSV(path){
+async function loadCSV(path, required = true){
   const response = await fetch(path);
 
   if(!response.ok){
-    throw new Error(`Erro ao carregar ${path} - HTTP ${response.status}`);
+    if(required) throw new Error(`Erro ao carregar ${path} - HTTP ${response.status}`);
+    return [];
   }
 
   const text = await response.text();
   const rows = parseCSV(text);
 
   if(rows.length <= 1){
-    throw new Error(`Arquivo vazio ou sem dados: ${path}`);
+    if(required) throw new Error(`Arquivo vazio ou sem dados: ${path}`);
+    return [];
   }
 
   const headers = rows[0].map(h => String(h || "").trim().replace(/^\uFEFF/, ""));
 
   return rows.slice(1).map(row => {
     const obj = {};
-
-    headers.forEach((h, i) => {
-      obj[h] = row[i] || "";
-    });
-
+    headers.forEach((h, i) => obj[h] = row[i] || "");
     return obj;
   });
 }
@@ -203,7 +265,6 @@ function get(obj, names){
 
   for(const name of names){
     const found = keys.find(k => norm(k) === norm(name));
-
     if(found) return obj[found];
   }
 
@@ -314,6 +375,92 @@ function setFilterValue(id, value){
 }
 
 /* =========================
+   MOTOR DE CÁLCULO GERAL
+========================= */
+
+function calcularFaixa(previsaoInicialObj, dataRecebimentoObj){
+  if(dataRecebimentoObj) return "Entregue";
+  if(!previsaoInicialObj) return "Dentro do prazo";
+
+  const hoje = normalizeDate(new Date());
+  const previsao = normalizeDate(previsaoInicialObj);
+  const limite = addDays(previsao, 7);
+
+  if(hoje < previsao) return "Dentro do prazo";
+  if(hoje < limite) return "Alerta";
+  if(diffDays(hoje, limite) === 0) return "Crítico";
+  return "Atrasado";
+}
+
+function mapGeralRows(rows){
+  return rows.map(r => {
+    const quantidade = numberBR(get(r, ["Quantidade Compra"]));
+    const precoUnitario = numberBR(get(r, ["Preço Unit. Compra", "Preco Unit. Compra"]));
+    const valor = quantidade * precoUnitario;
+
+    const dataRecebimento = get(r, ["Data Recebimentos", "Data Recebimento", "Recebimento"]);
+    const dataRecebimentoObj = parseDateBR(dataRecebimento);
+
+    const previsaoInicial = get(r, [
+      "Previsão Entrega Inicial",
+      "Previsao Entrega Inicial",
+      "Data Prevista Inicial"
+    ]);
+
+    const previsaoInicialObj = parseDateBR(previsaoInicial);
+    const dataLimiteOperacionalObj = addDays(previsaoInicialObj, 7);
+
+    const condicaoPagamento = String(get(r, ["Condição Pagamento", "Condicao Pagamento"])).trim();
+    const prazoPagamento = CONDICOES_PAGAMENTO[condicaoPagamento] ?? 0;
+
+    const faixa = calcularFaixa(previsaoInicialObj, dataRecebimentoObj);
+
+    const entregue = !!dataRecebimentoObj;
+
+    const diasAtrasoEntrega = entregue && dataLimiteOperacionalObj
+      ? Math.max(0, diffDays(dataRecebimentoObj, dataLimiteOperacionalObj))
+      : 0;
+
+    const atrasoAberto = !entregue && dataLimiteOperacionalObj
+      ? Math.max(0, diffDays(new Date(), dataLimiteOperacionalObj))
+      : 0;
+
+    const entregueNoPrazo = entregue && dataLimiteOperacionalObj
+      ? dataRecebimentoObj <= dataLimiteOperacionalObj
+      : false;
+
+    return {
+      pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido"]),
+      produto: get(r, ["Produto", "Cod Produto", "Código Produto", "Codigo Produto"]),
+      descricaoProduto: get(r, ["Descrição Produto", "Descricao Produto", "Desc Produto"]),
+      fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
+      comprador: get(r, ["Nome Comprador", "Comprador"]),
+      quantidade,
+      precoUnitario,
+      valor,
+      condicaoPagamento,
+      prazoPagamento,
+      faixa,
+      entregue,
+      entregueNoPrazo,
+      atraso: entregue ? diasAtrasoEntrega : atrasoAberto,
+      dataRecebimento,
+      dataRecebimentoObj,
+      mesRecebimento: monthKeyFromDate(dataRecebimentoObj),
+      previsaoInicial,
+      previsaoInicialObj,
+      dataLimiteOperacionalObj
+    };
+  }).filter(x => x.fornecedor || x.pedido);
+}
+
+async function ensureGeralData(){
+  if(!geralData.length){
+    geralData = mapGeralRows(await loadCSV(FILES.geral));
+  }
+}
+
+/* =========================
    DASHBOARD GERAL
 ========================= */
 
@@ -327,44 +474,6 @@ function faixaClass(faixa){
   if(f.includes("entregue")) return "badge-blue";
 
   return "badge-gray";
-}
-
-function mapGeralRows(rows){
-  return rows.map(r => {
-    const dataRecebimento = get(r, ["Data Recebimentos", "Data Recebimento", "Recebimento"]);
-    const dataObj = parseDateBR(dataRecebimento);
-
-    const previsaoInicial = get(r, [
-      "Previsão Entrega Inicial",
-      "Previsao Entrega Inicial",
-      "Data Prevista Inicial"
-    ]);
-
-    const previsaoInicialObj = parseDateBR(previsaoInicial);
-
-    return {
-      pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido"]),
-      produto: get(r, ["Produto", "Cod Produto", "Código Produto", "Codigo Produto"]),
-      descricaoProduto: get(r, ["Descrição Produto", "Descricao Produto", "Desc Produto"]),
-      fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
-      comprador: get(r, ["Nome Comprador", "Comprador"]),
-      faixa: get(r, ["Faixa de risco", "Faixa Risco", "Risco"]),
-      valor: numberBR(get(r, ["Valor total do pedido", "Valor total", "Valor Pedido", "Valor"])),
-      atraso: numberBR(get(r, ["Entregas com atraso", "Dias atraso", "Atraso"])),
-      dataRecebimento,
-      mesRecebimento: monthKeyFromDate(dataObj),
-      previsaoInicial,
-      previsaoInicialObj,
-      entradaPrevista: get(r, ["Entrada prevista", "Previsão entrega", "Previsao entrega"]),
-      prazoPagamento: numberBR(get(r, ["média de dias", "Média de dias", "Prazo Médio Pagamento", "Prazo médio pagamento"]))
-    };
-  }).filter(x => x.fornecedor || x.pedido);
-}
-
-async function ensureGeralData(){
-  if(!geralData.length){
-    geralData = mapGeralRows(await loadCSV(FILES.geral));
-  }
 }
 
 async function renderGeral(){
@@ -399,7 +508,7 @@ function renderGeralView(base){
   app.innerHTML = `
     <section class="hero">
       <h1>Dashboard Geral</h1>
-      <p>Indicadores de pedidos, entregas, risco, performance operacional e recebimentos mensais.</p>
+      <p>Indicadores calculados automaticamente a partir do CSV bruto.</p>
     </section>
 
     ${renderFilterBar([
@@ -453,18 +562,19 @@ function limparFiltrosGeral(){
   setFilterValue("geralMes", "");
 }
 
-function gerarRelatorioAtencao(){
+async function gerarRelatorioAtencao(){
+  await ensureGeralData();
+
   const comprador = getFilterValue("geralComprador");
   const fornecedor = getFilterValue("geralFornecedor");
   const pedidoBusca = norm(getFilterValue("geralPedido"));
 
   const base = geralData.filter(x => {
     const dias = daysUntil(x.previsaoInicialObj);
-    const naoEntregue = norm(x.faixa) !== "entregue";
-    const emAtencao = dias !== null && dias <= 10;
 
-    return naoEntregue &&
-      emAtencao &&
+    return !x.entregue &&
+      dias !== null &&
+      dias <= 10 &&
       (!comprador || x.comprador === comprador) &&
       (!fornecedor || x.fornecedor === fornecedor) &&
       (!pedidoBusca || norm(x.pedido).includes(pedidoBusca));
@@ -491,172 +601,32 @@ function gerarRelatorioAtencao(){
 <meta charset="UTF-8">
 <title>Relatório de Pedidos em Atenção</title>
 <style>
-  body{
-    font-family:Arial,Helvetica,sans-serif;
-    margin:0;
-    color:#f8fafc;
-    background:#020617;
-  }
-
-  .page{
-    padding:30px;
-  }
-
-  .header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    border-bottom:4px solid #dc2626;
-    padding-bottom:18px;
-    margin-bottom:22px;
-  }
-
-  .logo-box{
-    background:#020617;
-    border:1px solid #334155;
-    border-radius:14px;
-    padding:14px 18px;
-  }
-
-  .logo{
-    max-width:260px;
-    display:block;
-  }
-
-  h1{
-    font-size:25px;
-    margin:0;
-    color:#f8fafc;
-  }
-
-  .sub{
-    color:#94a3b8;
-    margin-top:7px;
-    font-size:13px;
-  }
-
-  .print-btn{
-    margin-top:12px;
-    background:#dc2626;
-    color:white;
-    border:0;
-    border-radius:10px;
-    padding:10px 16px;
-    font-weight:bold;
-    cursor:pointer;
-  }
-
-  .meta{
-    display:grid;
-    grid-template-columns:repeat(4,1fr);
-    gap:12px;
-    margin:18px 0;
-  }
-
-  .card{
-    border:1px solid #334155;
-    border-radius:14px;
-    padding:13px;
-    background:#0f172a;
-  }
-
-  .card small{
-    display:block;
-    color:#94a3b8;
-    font-size:11px;
-    text-transform:uppercase;
-    font-weight:bold;
-  }
-
-  .card strong{
-    display:block;
-    margin-top:7px;
-    font-size:20px;
-    color:#f8fafc;
-  }
-
-  .criteria{
-    font-size:12px;
-    color:#cbd5e1;
-    background:#0f172a;
-    border:1px solid #334155;
-    border-radius:12px;
-    padding:13px;
-    margin-bottom:16px;
-    line-height:1.6;
-  }
-
-  table{
-    width:100%;
-    border-collapse:collapse;
-    font-size:11px;
-    background:#020617;
-    border:1px solid #334155;
-  }
-
-  th{
-    background:#111827;
-    color:#f8fafc;
-    text-align:left;
-    padding:8px;
-    border-bottom:1px solid #334155;
-  }
-
-  td{
-    border-bottom:1px solid #1e293b;
-    padding:7px;
-    vertical-align:top;
-    color:#e5e7eb;
-  }
-
-  tr:nth-child(even){
-    background:#0f172a;
-  }
-
-  .late{
-    color:#f87171;
-    font-weight:bold;
-  }
-
-  .soon{
-    color:#facc15;
-    font-weight:bold;
-  }
-
-  .footer{
-    margin-top:18px;
-    font-size:10px;
-    color:#94a3b8;
-    text-align:right;
-  }
-
+  body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#f8fafc;background:#020617;}
+  .page{padding:30px;}
+  .header{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid #dc2626;padding-bottom:18px;margin-bottom:22px;}
+  .logo-box{background:#020617;border:1px solid #334155;border-radius:14px;padding:14px 18px;}
+  .logo{max-width:260px;display:block;}
+  h1{font-size:25px;margin:0;color:#f8fafc;}
+  .sub{color:#94a3b8;margin-top:7px;font-size:13px;}
+  .print-btn{margin-top:12px;background:#dc2626;color:white;border:0;border-radius:10px;padding:10px 16px;font-weight:bold;cursor:pointer;}
+  .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0;}
+  .card{border:1px solid #334155;border-radius:14px;padding:13px;background:#0f172a;}
+  .card small{display:block;color:#94a3b8;font-size:11px;text-transform:uppercase;font-weight:bold;}
+  .card strong{display:block;margin-top:7px;font-size:20px;color:#f8fafc;}
+  .criteria{font-size:12px;color:#cbd5e1;background:#0f172a;border:1px solid #334155;border-radius:12px;padding:13px;margin-bottom:16px;line-height:1.6;}
+  table{width:100%;border-collapse:collapse;font-size:11px;background:#020617;border:1px solid #334155;}
+  th{background:#111827;color:#f8fafc;text-align:left;padding:8px;border-bottom:1px solid #334155;}
+  td{border-bottom:1px solid #1e293b;padding:7px;vertical-align:top;color:#e5e7eb;}
+  tr:nth-child(even){background:#0f172a;}
+  .late{color:#f87171;font-weight:bold;}
+  .soon{color:#facc15;font-weight:bold;}
+  .footer{margin-top:18px;font-size:10px;color:#94a3b8;text-align:right;}
   @media print{
-    body{
-      background:#020617;
-      color:#f8fafc;
-      -webkit-print-color-adjust:exact;
-      print-color-adjust:exact;
-    }
-
-    .print-btn{
-      display:none;
-    }
-
-    .page{
-      padding:14px;
-    }
-
-    .header{
-      break-inside:avoid;
-    }
-
-    table{
-      font-size:9px;
-    }
-
-    th,td{
-      padding:5px;
-    }
+    body{background:#020617;color:#f8fafc;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .print-btn{display:none;}
+    .page{padding:14px;}
+    table{font-size:9px;}
+    th,td{padding:5px;}
   }
 </style>
 </head>
@@ -667,7 +637,6 @@ function gerarRelatorioAtencao(){
     <div class="logo-box">
       <img src="logo-linshalm.png" class="logo">
     </div>
-
     <div style="text-align:right">
       <h1>Relatório de Follow-up</h1>
       <div class="sub">Pedidos em atenção por Previsão Entrega Inicial</div>
@@ -703,7 +672,6 @@ function gerarRelatorioAtencao(){
         <th>Dias</th>
       </tr>
     </thead>
-
     <tbody>
       ${base.map(x => {
         const dias = daysUntil(x.previsaoInicialObj);
@@ -750,8 +718,12 @@ function renderGeralContent(base){
   const entregues = countFaixa("Entregue");
   const totalComprado = data.reduce((sum, x) => sum + x.valor, 0);
 
-  const entreguesData = data.filter(x => norm(x.faixa) === "entregue");
-  const entreguesNoPrazo = entreguesData.filter(x => x.atraso <= 0).length;
+  const prazoMedioPonderado = totalComprado > 0
+    ? Math.round(data.reduce((sum, x) => sum + (x.valor * x.prazoPagamento), 0) / totalComprado)
+    : 0;
+
+  const entreguesData = data.filter(x => x.entregue);
+  const entreguesNoPrazo = entreguesData.filter(x => x.entregueNoPrazo).length;
 
   const perfEntrega = entreguesData.length
     ? Math.round((entreguesNoPrazo / entreguesData.length) * 100)
@@ -767,8 +739,8 @@ function renderGeralContent(base){
   ];
 
   const performanceComprador = Object.values(porComprador).map(g => {
-    const entregues = g.items.filter(x => norm(x.faixa) === "entregue");
-    const ok = entregues.filter(x => x.atraso <= 0).length;
+    const entregues = g.items.filter(x => x.entregue);
+    const ok = entregues.filter(x => x.entregueNoPrazo).length;
 
     return {
       nome: g.nome,
@@ -811,6 +783,7 @@ function renderGeralContent(base){
       ${kpi("Dentro do prazo", dentro, "green", "aplicarFiltroGeralFaixa('Dentro do prazo')")}
       ${kpi("Entregues", entregues, "blue", "aplicarFiltroGeralFaixa('Entregue')")}
       ${kpi("Total comprado", money(totalComprado), "blue")}
+      ${kpi("Prazo médio", `${prazoMedioPonderado} dias`, "blue")}
       ${kpi("Entregues no prazo", `${perfEntrega}%`, "green")}
     </section>
 
@@ -859,7 +832,11 @@ function renderGeralContent(base){
             <th>Descrição Produto</th>
             <th>Fornecedor</th>
             <th>Comprador</th>
+            <th>Qtd</th>
+            <th>Preço Unit.</th>
             <th>Valor</th>
+            <th>Condição</th>
+            <th>Prazo Pgto</th>
             <th>Faixa</th>
             <th>Atraso</th>
             <th>Data recebimento</th>
@@ -875,7 +852,11 @@ function renderGeralContent(base){
               <td>${esc(x.descricaoProduto || "—")}</td>
               <td><b>${esc(x.fornecedor || "—")}</b></td>
               <td>${esc(x.comprador || "—")}</td>
+              <td>${x.quantidade}</td>
+              <td>${money(x.precoUnitario)}</td>
               <td>${money(x.valor)}</td>
+              <td>${esc(x.condicaoPagamento || "—")}</td>
+              <td>${x.prazoPagamento} dias</td>
               <td><span class="badge ${faixaClass(x.faixa)}">${esc(x.faixa || "—")}</span></td>
               <td>${x.atraso}</td>
               <td>${esc(x.dataRecebimento || "—")}</td>
@@ -913,72 +894,16 @@ function perfText(perf){
   return perf === null ? "Sem medição" : `${perf}%`;
 }
 
-function contarPedidosPorFornecedor(baseGeral){
-  const mapa = {};
-
-  baseGeral.forEach(item => {
-    const fornecedor = norm(item.fornecedor);
-    const pedido = norm(item.pedido);
-
-    if(!fornecedor || !pedido) return;
-
-    if(!mapa[fornecedor]){
-      mapa[fornecedor] = new Set();
-    }
-
-    mapa[fornecedor].add(pedido);
-  });
-
-  const resultado = {};
-
-  Object.keys(mapa).forEach(fornecedor => {
-    resultado[fornecedor] = mapa[fornecedor].size;
-  });
-
-  return resultado;
-}
-
 function classificarFornecedorAutomatico(fornecedor, valor, performance, pedidos){
   const nome = norm(fornecedor);
   const ehEstrategico = FORNECEDORES_ESTRATEGICOS_FIXOS.some(item => norm(item) === nome);
 
-  if(ehEstrategico){
-    return "Estratégico";
-  }
-
-  if(pedidos <= 1){
-    return "Não crítico";
-  }
-
-  if(performance !== null && performance >= 60 && valor >= 100000){
-    return "Alavancável";
-  }
-
-  if(performance !== null && performance >= 60 && valor < 100000){
-    return "Não crítico";
-  }
+  if(ehEstrategico) return "Estratégico";
+  if(pedidos <= 1) return "Não crítico";
+  if(performance !== null && performance >= 60 && valor >= 100000) return "Alavancável";
+  if(performance !== null && performance >= 60 && valor < 100000) return "Não crítico";
 
   return "Gargalo";
-}
-
-function mapFornecedoresRows(rows, pedidosPorFornecedor){
-  return rows.map(r => {
-    const fornecedor = get(r, ["Descrição Fornecedor", "Fornecedor"]);
-    const valor = numberBR(get(r, ["Valor total", "Valor"]));
-    const performance = parsePercent(get(r, ["Performance de entrega", "Performance"]));
-    const pedidos = pedidosPorFornecedor[norm(fornecedor)] || 0;
-
-    return {
-      fornecedor,
-      valor,
-      classificacao: Number(get(r, ["Classificação", "Ranking"])) || 0,
-      comprador: get(r, ["Comprador"]),
-      plano: get(r, ["Plano de ação", "Plano"]),
-      performance,
-      pedidos,
-      situacao: classificarFornecedorAutomatico(fornecedor, valor, performance, pedidos)
-    };
-  }).filter(x => x.fornecedor);
 }
 
 async function renderFornecedores(){
@@ -992,8 +917,46 @@ async function renderFornecedores(){
   try{
     await ensureGeralData();
 
-    const pedidosPorFornecedor = contarPedidosPorFornecedor(geralData);
-    fornecedoresData = mapFornecedoresRows(await loadCSV(FILES.fornecedores), pedidosPorFornecedor);
+    const planoRows = await loadCSV(FILES.fornecedores, false);
+    const planoMap = {};
+
+    planoRows.forEach(r => {
+      const fornecedor = get(r, ["Descrição Fornecedor", "Fornecedor"]);
+      if(!fornecedor) return;
+      planoMap[norm(fornecedor)] = {
+        plano: get(r, ["Plano de ação", "Plano"]),
+        classificacao: Number(get(r, ["Classificação", "Ranking"])) || 0
+      };
+    });
+
+    fornecedoresData = Object.values(group(geralData, "fornecedor")).map((g, index) => {
+      const valor = g.items.reduce((sum,x) => sum + x.valor, 0);
+      const entregues = g.items.filter(x => x.entregue);
+      const ok = entregues.filter(x => x.entregueNoPrazo).length;
+      const performance = entregues.length ? Math.round((ok / entregues.length) * 100) : null;
+      const pedidos = new Set(g.items.map(x => x.pedido).filter(Boolean)).size;
+
+      const compradoresValor = Object.values(group(g.items, "comprador"))
+        .map(c => ({
+          nome:c.nome,
+          valor:c.items.reduce((sum,x) => sum + x.valor, 0)
+        }))
+        .sort((a,b) => b.valor - a.valor);
+
+      const extra = planoMap[norm(g.nome)] || {};
+
+      return {
+        fornecedor:g.nome,
+        valor,
+        classificacao: extra.classificacao || index + 1,
+        comprador: compradoresValor[0]?.nome || "Não informado",
+        plano: extra.plano || "",
+        performance,
+        pedidos,
+        situacao: classificarFornecedorAutomatico(g.nome, valor, performance, pedidos)
+      };
+    }).sort((a,b) => b.valor - a.valor)
+      .map((x,i) => ({...x, classificacao:i + 1}));
 
     renderFornecedoresView(fornecedoresData);
   } catch(error){
@@ -1002,7 +965,7 @@ async function renderFornecedores(){
     app.innerHTML = `
       <section class="hero">
         <h1>Ranking de Fornecedores</h1>
-        <p>Erro ao carregar o arquivo <b>data/fornecedores.csv</b>. Veja o Console com F12.</p>
+        <p>Erro ao carregar o ranking de fornecedores. Veja o Console com F12.</p>
       </section>
     `;
   }
@@ -1016,7 +979,7 @@ function renderFornecedoresView(base){
   app.innerHTML = `
     <section class="hero">
       <h1>Ranking de Fornecedores / Matriz Kraljic</h1>
-      <p>Classificação automática: estratégicos fixos, compra única como não crítico, alavancáveis por valor/performance e gargalos.</p>
+      <p>Classificação automática calculada pelo próprio dashboard.</p>
     </section>
 
     ${renderFilterBar([
