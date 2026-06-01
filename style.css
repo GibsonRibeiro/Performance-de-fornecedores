@@ -36,7 +36,6 @@ body{
   display:flex;
   gap:12px;
   flex-wrap:wrap;
-  justify-content:flex-end;
 }
 
 .nav-btn{
@@ -101,7 +100,7 @@ main{
 
 .filters{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  grid-template-columns:repeat(5,1fr);
   gap:12px;
   margin:0 0 22px 0;
   background:#020617;
@@ -132,7 +131,7 @@ main{
 
 .kpis{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
   gap:12px;
   margin-bottom:22px;
 }
@@ -142,7 +141,7 @@ main{
   border:1px solid #475569;
   border-radius:18px;
   padding:16px;
-  min-height:96px;
+  min-height:100px;
   transition:.2s;
 }
 
@@ -162,8 +161,10 @@ main{
 .kpi strong{
   display:block;
   margin-top:10px;
-  font-size:28px;
+  font-size:26px;
   line-height:1.2;
+  white-space:normal;
+  overflow-wrap:anywhere;
 }
 
 /* CORES */
@@ -453,6 +454,12 @@ tr:hover{
 
 /* RESPONSIVO */
 
+@media(max-width:1600px){
+  .filters{
+    grid-template-columns:repeat(3,1fr);
+  }
+}
+
 @media(max-width:1200px){
   .topbar{
     flex-direction:column;
@@ -464,12 +471,12 @@ tr:hover{
     width:100%;
   }
 
-  .menu{
-    justify-content:flex-start;
-  }
-
   .panel-grid,
   .matrix{
+    grid-template-columns:1fr;
+  }
+
+  .filters{
     grid-template-columns:1fr;
   }
 
@@ -501,10 +508,6 @@ tr:hover{
   }
 
   .kpis{
-    grid-template-columns:1fr;
-  }
-
-  .filters{
     grid-template-columns:1fr;
   }
 }
