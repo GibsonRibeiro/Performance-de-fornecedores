@@ -1086,8 +1086,7 @@ function renderFornecedoresContent(base){
    RANKING SAVING INPUTÁVEL
 ========================= */
 
-const SAVING_STORAGE_KEY = "linshalm_savings_v1";
-
+const SAVING_STORAGE_KEY = "linshalm_savings_v2";
 let savingRegistros = [];
 
 function uid(){
@@ -1106,7 +1105,7 @@ function carregarSavingsLocal(){
   }
 }
 
-function statusAtivo(x){
+function statusAtivoSaving(x){
   return norm(x.status) !== "declinado";
 }
 
@@ -1116,19 +1115,17 @@ function calcularSavingRegistro(r){
   const quantidade = numberBR(r.quantidade);
   const precoAtual = numberBR(r.precoAtual);
 
-  let vencedor = "";
-  let precoNegociado = 0;
-
   if(categoria === "Saving"){
     const competidores = [
       {nome:r.competidorA, preco:numberBR(r.precoCompetidorA)},
       {nome:r.competidorB, preco:numberBR(r.precoCompetidorB)},
       {nome:r.competidorC, preco:numberBR(r.precoCompetidorC)}
-    ].filter(x => x.nome && x.preco > 0)
-     .sort((a,b) => a.preco - b.preco);
+    ]
+    .filter(x => x.nome && x.preco > 0)
+    .sort((a,b) => a.preco - b.preco);
 
-    vencedor = competidores[0]?.nome || "";
-    precoNegociado = competidores[0]?.preco || 0;
+    const vencedor = competidores[0]?.nome || "";
+    const precoNegociado = competidores[0]?.preco || 0;
 
     const savingUnitario = precoAtual - precoNegociado;
     const savingMensal = quantidade * savingUnitario;
@@ -1168,11 +1165,11 @@ function calcularSavingRegistro(r){
     ...r,
     vencedor:r.fornecedorAtual,
     precoNegociado:precoAcordado,
+    precoSolicitado,
+    precoAcordado,
     savingUnitario:0,
     savingMensal:0,
     savingTotal:0,
-    precoSolicitado,
-    precoAcordado,
     costAvoidanceUnitario,
     costAvoidanceMensal,
     costAvoidanceTotal,
@@ -1203,12 +1200,14 @@ function renderSavingView(base){
     </section>
 
     <section class="saving-actions">
-      <button class="action-btn" onclick="abrirModalSaving('Saving')">Incluir Saving</button>
-      <button class="action-btn" onclick="abrirModalSaving('Reajuste')">Incluir Reajuste</button>
-      <label class="action-btn file-btn">
+      <button class="action-btn" onclick="abrirModalSaving('Saving')">+ Novo Saving</button>
+      <button class="action-btn" onclick="abrirModalSaving('Reajuste')">+ Novo Reajuste</button>
+
+      <label class="action-btn secondary file-btn">
         Importar CSV
         <input type="file" accept=".csv" onchange="importarSavingCSV(event)">
       </label>
+
       <button class="action-btn secondary" onclick="exportarSavingCSV()">Baixar CSV consolidado</button>
     </section>
 
@@ -1220,7 +1219,7 @@ function renderSavingView(base){
     ])}
 
     <div id="savingContent"></div>
-    <div id="savingModal"></div>
+    <div id="savingModal" class="modal-root"></div>
   `;
 
   attachFilterEvents(
@@ -1238,7 +1237,7 @@ function filterSaving(base){
   const busca = norm(getFilterValue("savingBusca"));
 
   return base.filter(x => {
-    const fullText = norm(`${x.codigo} ${x.descricao} ${x.fornecedorAtual} ${x.vencedor} ${x.comprador} ${x.status}`);
+    const fullText = norm(`${x.codigo} ${x.descricao} ${x.fornecedorAtual} ${x.vencedor} ${x.comprador} ${x.status} ${x.categoria}`);
 
     return (!categoria || x.categoria === categoria) &&
       (!comprador || x.comprador === comprador) &&
@@ -1249,7 +1248,7 @@ function filterSaving(base){
 
 function renderSavingContent(base){
   const data = filterSaving(base);
-  const ativos = data.filter(statusAtivo);
+  const ativos = data.filter(statusAtivoSaving);
 
   const homologados = ativos.filter(x => norm(x.status) === "homologado");
   const pipeline = ativos.filter(x => norm(x.status).includes("curso"));
@@ -1260,7 +1259,8 @@ function renderSavingContent(base){
   const caHomologado = homologados.reduce((s,x) => s + x.costAvoidanceTotal, 0);
   const caPipeline = pipeline.reduce((s,x) => s + x.costAvoidanceTotal, 0);
 
-  const impactoTotal = savingHomologado + caHomologado;
+  const impactoHomologado = savingHomologado + caHomologado;
+  const impactoPipeline = savingPipeline + caPipeline;
 
   const porComprador = Object.values(group(ativos, "comprador"))
     .map(g => ({
@@ -1270,6 +1270,7 @@ function renderSavingContent(base){
     .sort((a,b) => b.valor - a.valor);
 
   const maxComprador = Math.max(...porComprador.map(x => Math.abs(x.valor)), 1);
+  const maxResumo = Math.max(Math.abs(savingHomologado), Math.abs(caHomologado), Math.abs(impactoHomologado), 1);
 
   const content = document.getElementById("savingContent");
 
@@ -1280,20 +1281,26 @@ function renderSavingContent(base){
       ${kpi("Saving pipeline", money(savingPipeline), "orange")}
       ${kpi("Cost Avoidance homologado", money(caHomologado), "green")}
       ${kpi("Cost Avoidance pipeline", money(caPipeline), "orange")}
-      ${kpi("Impacto total homologado", money(impactoTotal), "blue")}
+      ${kpi("Impacto homologado", money(impactoHomologado), "blue")}
+      ${kpi("Impacto pipeline", money(impactoPipeline), "orange")}
       ${kpi("Declinados", data.filter(x => norm(x.status) === "declinado").length, "red")}
     </section>
 
     <section class="panel-grid">
       <div class="panel">
         <h2>Impacto por comprador</h2>
-        ${porComprador.map(x => barLine(x.nome, Math.abs(x.valor), "bar-blue", money(x.valor), maxComprador)).join("")}
+        ${
+          porComprador.length
+          ? porComprador.map(x => barLine(x.nome, Math.abs(x.valor), "bar-blue", money(x.valor), maxComprador)).join("")
+          : `<div class="empty-state">Nenhum lançamento ativo para exibir.</div>`
+        }
       </div>
 
       <div class="panel">
-        <h2>Resumo por categoria</h2>
-        ${barLine("Saving", Math.abs(savingHomologado), "bar-green", money(savingHomologado), Math.max(Math.abs(savingHomologado), Math.abs(caHomologado), 1))}
-        ${barLine("Cost Avoidance", Math.abs(caHomologado), "bar-orange", money(caHomologado), Math.max(Math.abs(savingHomologado), Math.abs(caHomologado), 1))}
+        <h2>Resumo homologado</h2>
+        ${barLine("Saving", Math.abs(savingHomologado), "bar-green", money(savingHomologado), maxResumo)}
+        ${barLine("Cost Avoidance", Math.abs(caHomologado), "bar-orange", money(caHomologado), maxResumo)}
+        ${barLine("Impacto total", Math.abs(impactoHomologado), "bar-blue", money(impactoHomologado), maxResumo)}
       </div>
     </section>
 
@@ -1321,34 +1328,44 @@ function renderSavingContent(base){
         </thead>
 
         <tbody>
-          ${data.map(x => `
-            <tr class="${norm(x.status) === "declinado" ? "declined-row" : ""}">
-              <td>${esc(x.categoria)}</td>
-              <td>${esc(x.tipo)}</td>
-              <td>${esc(x.data)}</td>
-              <td>${esc(x.comprador)}</td>
-              <td>${esc(x.codigo)}</td>
-              <td><b>${esc(x.descricao)}</b></td>
-              <td>${esc(x.fornecedorAtual)}</td>
-              <td>${esc(x.vencedor || "—")}</td>
-              <td>
-                <select class="status-select" onchange="alterarStatusSaving('${x.id}', this.value)">
-                  ${["Homologação em curso","Homologado","Declinado"].map(s => `
-                    <option value="${s}" ${x.status === s ? "selected" : ""}>${s}</option>
-                  `).join("")}
-                </select>
-              </td>
-              <td>${x.quantidade}</td>
-              <td>${money(x.precoAtual)}</td>
-              <td>${money(x.precoNegociado)}</td>
-              <td>${money(x.savingTotal)}</td>
-              <td>${money(x.costAvoidanceTotal)}</td>
-              <td>${x.reducaoPercentual.toFixed(2)}%</td>
-              <td>
-                <button class="mini-btn" onclick="excluirSaving('${x.id}')">Excluir</button>
-              </td>
-            </tr>
-          `).join("")}
+          ${
+            data.length
+            ? data.map(x => `
+              <tr class="${norm(x.status) === "declinado" ? "declined-row" : ""}">
+                <td>${esc(x.categoria || "—")}</td>
+                <td>${esc(x.tipo || "—")}</td>
+                <td>${esc(x.data || "—")}</td>
+                <td>${esc(x.comprador || "—")}</td>
+                <td>${esc(x.codigo || "—")}</td>
+                <td><b>${esc(x.descricao || "—")}</b></td>
+                <td>${esc(x.fornecedorAtual || "—")}</td>
+                <td>${esc(x.vencedor || "—")}</td>
+                <td>
+                  <select class="status-select" onchange="alterarStatusSaving('${x.id}', this.value)">
+                    ${["Homologação em curso","Homologado","Declinado"].map(s => `
+                      <option value="${s}" ${x.status === s ? "selected" : ""}>${s}</option>
+                    `).join("")}
+                  </select>
+                </td>
+                <td>${esc(x.quantidade || "—")}</td>
+                <td>${money(numberBR(x.precoAtual))}</td>
+                <td>${money(x.precoNegociado)}</td>
+                <td>${money(x.savingTotal)}</td>
+                <td>${money(x.costAvoidanceTotal)}</td>
+                <td>${Number(x.reducaoPercentual || 0).toFixed(2)}%</td>
+                <td>
+                  <button class="mini-btn" onclick="excluirSaving('${x.id}')">Excluir</button>
+                </td>
+              </tr>
+            `).join("")
+            : `
+              <tr>
+                <td colspan="16">
+                  <div class="empty-state">Nenhum saving lançado ainda. Use “+ Novo Saving”, “+ Novo Reajuste” ou importe um CSV.</div>
+                </td>
+              </tr>
+            `
+          }
         </tbody>
       </table>
     </section>
@@ -1364,60 +1381,143 @@ function limparFiltrosSaving(){
 
 function abrirModalSaving(categoria){
   const modal = document.getElementById("savingModal");
+  const titulo = categoria === "Saving" ? "Incluir Saving" : "Incluir Reajuste / Cost Avoidance";
 
   modal.innerHTML = `
-    <div class="modal-backdrop">
-      <div class="modal-card">
-        <h2>${categoria === "Saving" ? "Incluir Saving" : "Incluir Reajuste / Cost Avoidance"}</h2>
-
-        <div class="modal-grid">
-          <input id="svData" placeholder="Data">
-          <input id="svComprador" placeholder="Comprador">
-          <input id="svCodigo" placeholder="Código">
-          <input id="svDescricao" placeholder="Descrição">
-          <input id="svFornecedorAtual" placeholder="Fornecedor atual">
-          <select id="svStatus">
-            <option>Homologação em curso</option>
-            <option>Homologado</option>
-            <option>Declinado</option>
-          </select>
-          <select id="svTipo">
-            <option>Spot</option>
-            <option>Anual</option>
-          </select>
-          <input id="svQuantidade" placeholder="Quantidade">
-          <input id="svPrecoAtual" placeholder="Preço atual">
-
-          ${
-            categoria === "Saving"
-            ? `
-              <input id="svCompetidorA" placeholder="Competidor A">
-              <input id="svPrecoCompetidorA" placeholder="Preço Competidor A">
-              <input id="svCompetidorB" placeholder="Competidor B">
-              <input id="svPrecoCompetidorB" placeholder="Preço Competidor B">
-              <input id="svCompetidorC" placeholder="Competidor C">
-              <input id="svPrecoCompetidorC" placeholder="Preço Competidor C">
-            `
-            : `
-              <input id="svReajusteSolicitado" placeholder="% Reajuste solicitado">
-              <input id="svReajusteAcordado" placeholder="% Reajuste acordado">
-            `
-          }
-
-          <textarea id="svObservacao" placeholder="Observação"></textarea>
+    <div class="modal-overlay" onclick="fecharModalSaving(event)">
+      <div class="modal-container" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div>
+            <h2>${titulo}</h2>
+            <p>${categoria === "Saving" ? "Informe os competidores. O menor preço será considerado vencedor automaticamente." : "Informe o reajuste solicitado e o reajuste acordado. O portal calcula o cost avoidance."}</p>
+          </div>
+          <button class="modal-close" onclick="fecharModalSaving()">×</button>
         </div>
 
-        <div class="modal-actions">
-          <button class="action-btn" onclick="salvarRegistroSaving('${categoria}')">Salvar</button>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Data</label>
+              <input id="svData" placeholder="dd/mm/aaaa">
+            </div>
+
+            <div class="form-group">
+              <label>Comprador</label>
+              <input id="svComprador" placeholder="Nome do comprador">
+            </div>
+
+            <div class="form-group">
+              <label>Código</label>
+              <input id="svCodigo" placeholder="Código do item">
+            </div>
+
+            <div class="form-group">
+              <label>Descrição</label>
+              <input id="svDescricao" placeholder="Descrição do item">
+            </div>
+
+            <div class="form-group">
+              <label>Fornecedor atual</label>
+              <input id="svFornecedorAtual" placeholder="Fornecedor atual">
+            </div>
+
+            <div class="form-group">
+              <label>Status</label>
+              <select id="svStatus">
+                <option>Homologação em curso</option>
+                <option>Homologado</option>
+                <option>Declinado</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Tipo</label>
+              <select id="svTipo">
+                <option>Spot</option>
+                <option>Anual</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Quantidade</label>
+              <input id="svQuantidade" placeholder="${categoria === "Saving" ? "Qtd negociada ou média mensal" : "Qtd média mensal"}">
+            </div>
+
+            <div class="form-group">
+              <label>Preço atual</label>
+              <input id="svPrecoAtual" placeholder="Ex.: 10,50">
+            </div>
+
+            ${
+              categoria === "Saving"
+              ? `
+                <div class="form-separator">Competidores</div>
+
+                <div class="form-group">
+                  <label>Competidor A</label>
+                  <input id="svCompetidorA" placeholder="Fornecedor A">
+                </div>
+
+                <div class="form-group">
+                  <label>Preço Competidor A</label>
+                  <input id="svPrecoCompetidorA" placeholder="Ex.: 9,80">
+                </div>
+
+                <div class="form-group">
+                  <label>Competidor B</label>
+                  <input id="svCompetidorB" placeholder="Fornecedor B">
+                </div>
+
+                <div class="form-group">
+                  <label>Preço Competidor B</label>
+                  <input id="svPrecoCompetidorB" placeholder="Ex.: 9,40">
+                </div>
+
+                <div class="form-group">
+                  <label>Competidor C</label>
+                  <input id="svCompetidorC" placeholder="Fornecedor C">
+                </div>
+
+                <div class="form-group">
+                  <label>Preço Competidor C</label>
+                  <input id="svPrecoCompetidorC" placeholder="Ex.: 9,60">
+                </div>
+              `
+              : `
+                <div class="form-separator">Reajuste</div>
+
+                <div class="form-group">
+                  <label>% Reajuste solicitado</label>
+                  <input id="svReajusteSolicitado" placeholder="Ex.: 10">
+                </div>
+
+                <div class="form-group">
+                  <label>% Reajuste acordado</label>
+                  <input id="svReajusteAcordado" placeholder="Ex.: 6">
+                </div>
+              `
+            }
+
+            <div class="form-group full">
+              <label>Observação</label>
+              <textarea id="svObservacao" placeholder="Observações da negociação"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
           <button class="action-btn secondary" onclick="fecharModalSaving()">Cancelar</button>
+          <button class="action-btn" onclick="salvarRegistroSaving('${categoria}')">Salvar lançamento</button>
         </div>
       </div>
     </div>
   `;
 }
 
-function fecharModalSaving(){
-  document.getElementById("savingModal").innerHTML = "";
+function fecharModalSaving(event){
+  if(event && event.target && !event.target.classList.contains("modal-overlay")) return;
+  const modal = document.getElementById("savingModal");
+  if(modal) modal.innerHTML = "";
 }
 
 function salvarRegistroSaving(categoria){
@@ -1475,6 +1575,8 @@ function importarSavingCSV(event){
 
   reader.onload = e => {
     const rows = parseCSV(e.target.result);
+    if(rows.length <= 1) return;
+
     const headers = rows[0].map(h => String(h || "").trim());
 
     const novos = rows.slice(1).map(row => {
