@@ -1,6 +1,5 @@
 const FILES = {
   geral: "./data/geral.csv",
-  fornecedores: "./data/fornecedores.csv",
   saving: "./data/saving.csv"
 };
 
@@ -139,7 +138,6 @@ function parseDateBR(text){
   let year = Number(parts[2]);
 
   if(year < 100) year += 2000;
-
   if(!day || !month || !year) return null;
 
   return new Date(year, month - 1, day);
@@ -375,7 +373,7 @@ function setFilterValue(id, value){
 }
 
 /* =========================
-   MOTOR DE CÁLCULO GERAL
+   MOTOR GERAL
 ========================= */
 
 function calcularFaixa(previsaoInicialObj, dataRecebimentoObj){
@@ -414,7 +412,6 @@ function mapGeralRows(rows){
     const prazoPagamento = CONDICOES_PAGAMENTO[condicaoPagamento] ?? 0;
 
     const faixa = calcularFaixa(previsaoInicialObj, dataRecebimentoObj);
-
     const entregue = !!dataRecebimentoObj;
 
     const diasAtrasoEntrega = entregue && dataLimiteOperacionalObj
@@ -870,7 +867,7 @@ function renderGeralContent(base){
 }
 
 /* =========================
-   RANKING FORNECEDORES
+   RANKING FORNECEDORES — GERADO PELO GERAL.CSV
 ========================= */
 
 function statusFornecedorClass(status){
@@ -917,46 +914,38 @@ async function renderFornecedores(){
   try{
     await ensureGeralData();
 
-    const planoRows = await loadCSV(FILES.fornecedores, false);
-    const planoMap = {};
+    fornecedoresData = Object.values(group(geralData, "fornecedor"))
+      .map(g => {
+        const valor = g.items.reduce((sum,x) => sum + x.valor, 0);
 
-    planoRows.forEach(r => {
-      const fornecedor = get(r, ["Descrição Fornecedor", "Fornecedor"]);
-      if(!fornecedor) return;
-      planoMap[norm(fornecedor)] = {
-        plano: get(r, ["Plano de ação", "Plano"]),
-        classificacao: Number(get(r, ["Classificação", "Ranking"])) || 0
-      };
-    });
+        const entregues = g.items.filter(x => x.entregue);
+        const ok = entregues.filter(x => x.entregueNoPrazo).length;
+        const performance = entregues.length ? Math.round((ok / entregues.length) * 100) : null;
 
-    fornecedoresData = Object.values(group(geralData, "fornecedor")).map((g, index) => {
-      const valor = g.items.reduce((sum,x) => sum + x.valor, 0);
-      const entregues = g.items.filter(x => x.entregue);
-      const ok = entregues.filter(x => x.entregueNoPrazo).length;
-      const performance = entregues.length ? Math.round((ok / entregues.length) * 100) : null;
-      const pedidos = new Set(g.items.map(x => x.pedido).filter(Boolean)).size;
+        const pedidos = new Set(g.items.map(x => x.pedido).filter(Boolean)).size;
 
-      const compradoresValor = Object.values(group(g.items, "comprador"))
-        .map(c => ({
-          nome:c.nome,
-          valor:c.items.reduce((sum,x) => sum + x.valor, 0)
-        }))
-        .sort((a,b) => b.valor - a.valor);
+        const compradorPrincipal = Object.values(group(g.items, "comprador"))
+          .map(c => ({
+            nome:c.nome,
+            valor:c.items.reduce((sum,x) => sum + x.valor, 0)
+          }))
+          .sort((a,b) => b.valor - a.valor)[0]?.nome || "Não informado";
 
-      const extra = planoMap[norm(g.nome)] || {};
-
-      return {
-        fornecedor:g.nome,
-        valor,
-        classificacao: extra.classificacao || index + 1,
-        comprador: compradoresValor[0]?.nome || "Não informado",
-        plano: extra.plano || "",
-        performance,
-        pedidos,
-        situacao: classificarFornecedorAutomatico(g.nome, valor, performance, pedidos)
-      };
-    }).sort((a,b) => b.valor - a.valor)
-      .map((x,i) => ({...x, classificacao:i + 1}));
+        return {
+          fornecedor:g.nome,
+          valor,
+          comprador:compradorPrincipal,
+          performance,
+          pedidos,
+          plano:"",
+          situacao:classificarFornecedorAutomatico(g.nome, valor, performance, pedidos)
+        };
+      })
+      .sort((a,b) => b.valor - a.valor)
+      .map((x,i) => ({
+        ...x,
+        classificacao:i + 1
+      }));
 
     renderFornecedoresView(fornecedoresData);
   } catch(error){
@@ -965,7 +954,7 @@ async function renderFornecedores(){
     app.innerHTML = `
       <section class="hero">
         <h1>Ranking de Fornecedores</h1>
-        <p>Erro ao carregar o ranking de fornecedores. Veja o Console com F12.</p>
+        <p>Erro ao gerar o ranking a partir do <b>data/geral.csv</b>. Veja o Console com F12.</p>
       </section>
     `;
   }
@@ -979,23 +968,22 @@ function renderFornecedoresView(base){
   app.innerHTML = `
     <section class="hero">
       <h1>Ranking de Fornecedores / Matriz Kraljic</h1>
-      <p>Classificação automática calculada pelo próprio dashboard.</p>
+      <p>Ranking gerado automaticamente a partir do arquivo geral.csv.</p>
     </section>
 
     ${renderFilterBar([
       {type:"select", id:"fornComprador", label:"Todos compradores", options:compradores},
       {type:"select", id:"fornFornecedor", label:"Todos fornecedores", options:fornecedores},
       {type:"select", id:"fornSituacao", label:"Todas situações", options:situacoes},
-      {type:"select", id:"fornPlano", label:"Todos planos", options:["Com plano", "Sem plano"]},
       {type:"select", id:"fornPerf", label:"Todas performances", options:["Sem medição", "Boa ≥ 85%", "Alerta 60% a 84%", "Crítica < 60%"]},
-      {type:"text", id:"fornBusca", placeholder:"Buscar fornecedor ou plano de ação"}
+      {type:"text", id:"fornBusca", placeholder:"Buscar fornecedor"}
     ])}
 
     <div id="fornecedoresContent"></div>
   `;
 
   attachFilterEvents(
-    ["fornComprador","fornFornecedor","fornSituacao","fornPlano","fornPerf","fornBusca"],
+    ["fornComprador","fornFornecedor","fornSituacao","fornPerf","fornBusca"],
     () => renderFornecedoresContent(base)
   );
 
@@ -1006,17 +994,11 @@ function filterFornecedores(base){
   const comprador = getFilterValue("fornComprador");
   const fornecedor = getFilterValue("fornFornecedor");
   const situacao = getFilterValue("fornSituacao");
-  const plano = getFilterValue("fornPlano");
   const perf = getFilterValue("fornPerf");
   const busca = norm(getFilterValue("fornBusca"));
 
   return base.filter(x => {
-    const fullText = norm(`${x.fornecedor} ${x.plano} ${x.comprador} ${x.situacao}`);
-
-    const passaPlano =
-      !plano ||
-      (plano === "Com plano" && !!x.plano) ||
-      (plano === "Sem plano" && !x.plano);
+    const fullText = norm(`${x.fornecedor} ${x.comprador} ${x.situacao}`);
 
     const passaPerf =
       !perf ||
@@ -1028,7 +1010,6 @@ function filterFornecedores(base){
     return (!comprador || x.comprador === comprador) &&
       (!fornecedor || x.fornecedor === fornecedor) &&
       (!situacao || x.situacao === situacao) &&
-      passaPlano &&
       passaPerf &&
       (!busca || fullText.includes(busca));
   }).sort((a,b) => a.classificacao - b.classificacao);
@@ -1036,10 +1017,6 @@ function filterFornecedores(base){
 
 function aplicarFiltroFornecedorSituacao(situacao){
   setFilterValue("fornSituacao", situacao);
-}
-
-function aplicarFiltroFornecedorPlano(valor){
-  setFilterValue("fornPlano", valor);
 }
 
 function aplicarFiltroFornecedorPerf(valor){
@@ -1050,7 +1027,6 @@ function limparFiltrosFornecedores(){
   setFilterValue("fornComprador", "");
   setFilterValue("fornFornecedor", "");
   setFilterValue("fornSituacao", "");
-  setFilterValue("fornPlano", "");
   setFilterValue("fornPerf", "");
   setFilterValue("fornBusca", "");
 }
@@ -1070,7 +1046,6 @@ function renderFornecedoresContent(base){
       ${kpi("Alavancáveis", data.filter(x => x.situacao === "Alavancável").length, "blue", "aplicarFiltroFornecedorSituacao('Alavancável')")}
       ${kpi("Gargalos", data.filter(x => x.situacao === "Gargalo").length, "red", "aplicarFiltroFornecedorSituacao('Gargalo')")}
       ${kpi("Não críticos", data.filter(x => x.situacao === "Não crítico").length, "orange", "aplicarFiltroFornecedorSituacao('Não crítico')")}
-      ${kpi("Com plano", data.filter(x => x.plano).length, "yellow", "aplicarFiltroFornecedorPlano('Com plano')")}
       ${kpi("Sem medição", data.filter(x => x.performance === null).length, "orange", "aplicarFiltroFornecedorPerf('Sem medição')")}
     </section>
 
@@ -1097,7 +1072,6 @@ function renderFornecedoresContent(base){
                     <span>Pedidos</span>
                     <b>${x.pedidos}</b>
                   </div>
-                  ${x.plano ? `<div class="row"><b class="yellow">${esc(x.plano)}</b></div>` : ""}
                 </div>
               `).join("")}
             </div>
