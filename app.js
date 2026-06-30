@@ -1,3 +1,7 @@
+/* =========================
+   CONFIGURAÇÕES GERAIS
+========================= */
+
 const FILES = {
   geral: "./data/geral.csv",
   saving: "./data/saving.csv",
@@ -23,7 +27,7 @@ function getSupabaseClient(){
     return supabaseClient;
   }
 
-  console.warn("Supabase não carregado. Verifique se o script do Supabase está antes do app.js no index.html.");
+  console.warn("Supabase não carregado. Ranking Saving usará CSV local se existir.");
   return null;
 }
 
@@ -90,6 +94,10 @@ const FORNECEDORES_ESTRATEGICOS_FIXOS = [
   "METALURGICA SCHILD LTDA"
 ];
 
+/* =========================
+   ESTADO GLOBAL
+========================= */
+
 let geralData = [];
 let savingData = [];
 let indicesData = [];
@@ -97,7 +105,22 @@ let indicesData = [];
 let indicesTentouCarregar = false;
 let inflacaoPontoSelecionado = null;
 
-const app = document.getElementById("app");
+let app = document.getElementById("app");
+
+function ensureAppElement(){
+  app = document.getElementById("app");
+
+  if(!app){
+    console.error("Elemento #app não encontrado no HTML.");
+    return null;
+  }
+
+  return app;
+}
+
+/* =========================
+   HELPERS BASE
+========================= */
 
 function norm(text){
   return String(text || "")
@@ -126,6 +149,7 @@ function money(value){
 
 function moneyKg(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+
   return `${money(value)}/kg`;
 }
 
@@ -142,17 +166,28 @@ function numberBR(text){
 
 function parsePercent(text){
   const value = String(text || "").replace("%","").trim();
+
   if(value === "") return null;
 
   const number = Number(value.replace(",","."));
+
   return Number.isFinite(number) ? number : null;
 }
 
 function parseDateBR(text){
   const raw = String(text || "").trim();
+
   if(!raw) return null;
 
+  if(/^\d{4}-\d{2}-\d{2}/.test(raw)){
+    const [year, month, day] = raw.slice(0,10).split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setHours(0,0,0,0);
+    return date;
+  }
+
   const parts = raw.split(/[\/\-]/);
+
   if(parts.length < 3) return null;
 
   let day = Number(parts[0]);
@@ -232,12 +267,17 @@ function mesNumeroFromValue(valor){
   if(!valor) return null;
 
   const idx = MESES_FILTRO.findIndex(m => norm(m) === norm(valor));
+
   if(idx >= 0) return idx + 1;
 
   const n = Number(String(valor).replace(/\D/g,""));
 
   return Number.isFinite(n) && n >= 1 && n <= 12 ? n : null;
 }
+/* =========================
+   CSV
+========================= */
+
 function parseCSV(text){
   const firstLine = text.split(/\r?\n/)[0] || "";
   const delimiter = firstLine.includes(";") ? ";" : ",";
@@ -321,13 +361,17 @@ function get(obj, names){
   return "";
 }
 
+/* =========================
+   FILTROS
+========================= */
+
 function uniqueOptions(data, key){
   return [...new Set(data.map(item => item[key]).filter(Boolean))]
     .sort((a,b) => String(a).localeCompare(String(b), "pt-BR"));
 }
 
 function optionList(values, label){
-  return `<option value="">${label}</option>` + values.map(v => {
+  return `<option value="">${esc(label)}</option>` + values.map(v => {
     return `<option value="${esc(v)}">${esc(v)}</option>`;
   }).join("");
 }
@@ -342,7 +386,18 @@ function setFilterValue(id, value){
   if(!el) return;
 
   el.value = value;
+}
+
+function triggerFilter(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+
   el.dispatchEvent(new Event("change"));
+}
+
+function setFilterAndTrigger(id, value){
+  setFilterValue(id, value);
+  triggerFilter(id);
 }
 
 function attachFilterEvents(ids, callback){
@@ -372,6 +427,10 @@ function renderFilterBar(config){
     </section>
   `;
 }
+
+/* =========================
+   COMPONENTES VISUAIS
+========================= */
 
 function kpi(label, value, color = "blue", action = ""){
   const clickable = action ? `onclick="${action}" style="cursor:pointer"` : "";
@@ -424,7 +483,7 @@ function group(data, key){
     if(!map[nome]){
       map[nome] = {
         nome,
-        items: []
+        items:[]
       };
     }
 
@@ -454,6 +513,10 @@ function barList(items, max){
   }).join("");
 }
 
+/* =========================
+   FORMATAÇÃO DE INDICADORES
+========================= */
+
 function percentText(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
 
@@ -473,6 +536,10 @@ function valorPontoKg(value){
     maximumFractionDigits:2
   })}/kg`;
 }
+
+/* =========================
+   PERÍODO / ANO / MÊS
+========================= */
 
 function anosDisponiveis(base){
   const encontrados = [...new Set(base.map(x => x.anoBase).filter(Boolean))]
@@ -573,8 +640,13 @@ function aplicarFiltroPeriodoMes(prefix, mesKey){
     anoEl.dispatchEvent(new Event("change"));
   }
 }
+/* =========================
+   INFLAÇÃO — CLASSIFICAÇÃO
+========================= */
+
 function classificarMascaraInflacao(mascara){
   const valor = String(mascara || "").trim();
+
   if(!valor) return null;
 
   const regras = [...MASCARAS_INFLACAO].sort((a,b) => b.prefixo.length - a.prefixo.length);
@@ -619,6 +691,10 @@ function limparPontoInflacao(){
   renderInflacaoContent(window.inflacaoBaseAtual || []);
 }
 
+/* =========================
+   ÍNDICES EXTERNOS OPCIONAIS
+========================= */
+
 function mapIndicesRows(rows){
   return rows.map(r => {
     const ano = String(get(r, ["Ano", "Year"])).trim();
@@ -660,6 +736,10 @@ function buscarIndiceMercado(familia, mesKey){
   return indicesData.find(x => norm(x.familia) === norm(familia) && x.key === mesKey) || null;
 }
 
+/* =========================
+   BASE GERAL
+========================= */
+
 function calcularFaixa(previsaoInicialObj, dataRecebimentoObj){
   if(dataRecebimentoObj) return "Entregue";
   if(!previsaoInicialObj) return "Dentro do prazo";
@@ -681,7 +761,12 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
     const precoUnitario = numberBR(get(r, ["Preço Unit. Compra", "Preco Unit. Compra"]));
     const valor = quantidade * precoUnitario;
 
-    const dataRecebimento = get(r, ["Data Recebimentos", "Data Recebimento", "Recebimento"]);
+    const dataRecebimento = get(r, [
+      "Data Recebimentos",
+      "Data Recebimento",
+      "Recebimento"
+    ]);
+
     const dataRecebimentoObj = parseDateBR(dataRecebimento);
 
     const previsaoInicial = get(r, [
@@ -693,10 +778,19 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
     const previsaoInicialObj = parseDateBR(previsaoInicial);
     const dataLimiteOperacionalObj = addDays(previsaoInicialObj, 7);
 
-    const condicaoPagamento = String(get(r, ["Condição Pagamento", "Condicao Pagamento"])).trim();
+    const condicaoPagamento = String(get(r, [
+      "Condição Pagamento",
+      "Condicao Pagamento"
+    ])).trim();
+
     const prazoPagamento = CONDICOES_PAGAMENTO[condicaoPagamento] ?? 0;
 
-    const mascaraEntrada = get(r, ["Máscara de Entrada", "Mascara de Entrada", "Mascara Entrada"]);
+    const mascaraEntrada = get(r, [
+      "Máscara de Entrada",
+      "Mascara de Entrada",
+      "Mascara Entrada"
+    ]);
+
     const inflacao = classificarMascaraInflacao(mascaraEntrada);
 
     const faixa = calcularFaixa(previsaoInicialObj, dataRecebimentoObj);
@@ -716,6 +810,7 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 
     return {
       anoBase:String(anoBase),
+
       pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido"]),
       produto: get(r, ["Produto", "Cod Produto", "Código Produto", "Codigo Produto"]),
       descricaoProduto: get(r, ["Descrição Produto", "Descricao Produto", "Desc Produto"]),
@@ -771,6 +866,10 @@ async function ensureGeralData(){
   geralData = carregados;
 }
 
+/* =========================
+   CÁLCULO INFLACIONÁRIO
+========================= */
+
 function filtrarBaseInflacao(base, opcaoId){
   const opcao = getOpcaoInflacao(opcaoId);
 
@@ -810,14 +909,18 @@ function gerarInflacaoMensal(base, opcaoId){
       return {
         mes:g.nome,
         label:monthLabel(g.nome),
+
         familia:opcao.familia,
         subfamilia:opcao.subfamilia,
         nomeOpcao:opcao.label,
+
         precoInterno,
         indiceMercado:valorIndice,
         nomeIndice:indice?.indice || "Mercado -1",
+
         diferencaPercentual,
         impactoEstimado,
+
         quantidadeTotal,
         valorTotal
       };
@@ -967,6 +1070,10 @@ function calcularInflacaoAnualPeriodo(baseFiltrada, opcaoId, baseComparativa){
   };
 }
 
+/* =========================
+   CORES SEMÂNTICAS
+========================= */
+
 function corPercentual(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "blue";
   if(Number(value) > 0) return "orange";
@@ -987,6 +1094,10 @@ function corImpacto(value){
   if(Number(value) < 0) return "green";
   return "blue";
 }
+/* =========================
+   INFLAÇÃO — CARDS E GRÁFICO
+========================= */
+
 function resumoBaseAnualPeriodo(info){
   if(!info) return "Sem base anual";
 
@@ -1177,6 +1288,7 @@ function renderInflacaoLineChart(rows, selectedMes){
     }
 
     const mostrarLabel = rows.length <= 14 || selected || idx === 0 || idx === rows.length - 1;
+
     if(!mostrarLabel) return "";
 
     return `
@@ -1402,32 +1514,17 @@ function renderInflacaoContent(base){
         padding:11px 16px;
         font-weight:800;
         cursor:not-allowed;
-        opacity:.55;
+        opacity:.6;
         font-size:13px;
       ">Visão consolidada do período</button>`;
 
   container.innerHTML = `
     <div style="
       display:flex;
+      justify-content:flex-end;
       align-items:center;
-      justify-content:space-between;
-      gap:14px;
-      flex-wrap:wrap;
-      background:#020617;
-      border:1px solid #1e293b;
-      border-radius:16px;
-      padding:14px 16px;
-      margin:16px 0;
+      margin:14px 0 12px;
     ">
-      <div>
-        <strong style="display:block;font-size:15px;color:#f8fafc;">
-          ${pontoSelecionado ? `Estudo do mês: ${esc(pontoSelecionado.label)}` : "Estudo do período consolidado"}
-        </strong>
-        <span style="display:block;color:#94a3b8;font-size:13px;margin-top:3px;">
-          ${esc(opcao.label)}
-        </span>
-      </div>
-
       ${acaoPonto}
     </div>
 
@@ -1456,7 +1553,10 @@ function faixaClass(faixa){
 }
 
 async function renderGeral(){
-  app.innerHTML = `
+  const root = ensureAppElement();
+  if(!root) return;
+
+  root.innerHTML = `
     <section class="hero">
       <h1>Dashboard Geral</h1>
       <p>Carregando base geral...</p>
@@ -1470,7 +1570,7 @@ async function renderGeral(){
   }catch(error){
     console.error("Erro Dashboard Geral:", error);
 
-    app.innerHTML = `
+    root.innerHTML = `
       <section class="hero">
         <h1>Dashboard Geral</h1>
         <p>Erro ao carregar o arquivo <b>data/geral.csv</b>. Veja o Console com F12.</p>
@@ -1480,12 +1580,15 @@ async function renderGeral(){
 }
 
 function renderGeralView(base){
+  const root = ensureAppElement();
+  if(!root) return;
+
   const anos = anosDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
   const faixas = uniqueOptions(base, "faixa");
 
-  app.innerHTML = `
+  root.innerHTML = `
     <section class="hero">
       <h1>Dashboard Geral</h1>
       <p>Indicadores calculados automaticamente a partir do CSV bruto, com visão anual, histórica e por período.</p>
@@ -1557,7 +1660,7 @@ function filterGeralComparativaInflacao(base){
 }
 
 function aplicarFiltroGeralFaixa(faixa){
-  setFilterValue("geralFaixa", faixa);
+  setFilterAndTrigger("geralFaixa", faixa);
 }
 
 function aplicarFiltroGeralMes(mes){
@@ -1572,6 +1675,8 @@ function limparFiltrosGeral(){
   setFilterValue("geralFornecedor", "");
   setFilterValue("geralPedido", "");
   setFilterValue("geralFaixa", "");
+
+  triggerFilter("geralAno");
 }
 
 async function gerarRelatorioAtencao(){
@@ -1593,11 +1698,13 @@ async function gerarRelatorioAtencao(){
   }).sort((a,b) => {
     const da = daysUntil(a.previsaoInicialObj);
     const db = daysUntil(b.previsaoInicialObj);
+
     return da - db;
   });
 
   const total = base.reduce((s,x) => s + x.valor, 0);
   const atrasados = base.filter(x => daysUntil(x.previsaoInicialObj) < 0).length;
+
   const vencendo = base.filter(x => {
     const d = daysUntil(x.previsaoInicialObj);
     return d >= 0 && d <= 10;
@@ -1712,6 +1819,12 @@ async function gerarRelatorioAtencao(){
 `;
 
   const win = window.open("", "_blank");
+
+  if(!win){
+    alert("O navegador bloqueou a abertura do relatório. Libere pop-ups para esta página.");
+    return;
+  }
+
   win.document.open();
   win.document.write(html);
   win.document.close();
@@ -1871,7 +1984,7 @@ function renderGeralContent(base){
           <h2>Acompanhamento inflacionário — Aço e Alumínio</h2>
           <p style="color:#94a3b8;line-height:1.5;margin-top:6px;">
             Preço médio Linshalm em R$/kg, calculado por valor comprado dividido pela quantidade comprada.
-            A visão inicial é o consolidado do período; ao clicar em um ponto, os cards mudam para o mês selecionado.
+            Clique em um ponto do gráfico para analisar o mês.
           </p>
         </div>
 
@@ -2060,7 +2173,10 @@ function calcularRankingFornecedores(base){
 }
 
 async function renderFornecedores(){
-  app.innerHTML = `
+  const root = ensureAppElement();
+  if(!root) return;
+
+  root.innerHTML = `
     <section class="hero">
       <h1>Ranking Fornecedores</h1>
       <p>Carregando fornecedores a partir da base geral...</p>
@@ -2073,7 +2189,7 @@ async function renderFornecedores(){
   }catch(error){
     console.error("Erro Ranking Fornecedores:", error);
 
-    app.innerHTML = `
+    root.innerHTML = `
       <section class="hero">
         <h1>Ranking Fornecedores</h1>
         <p>Erro ao carregar a base de fornecedores. Veja o Console com F12.</p>
@@ -2083,12 +2199,15 @@ async function renderFornecedores(){
 }
 
 function renderFornecedoresView(base){
+  const root = ensureAppElement();
+  if(!root) return;
+
   const anos = anosDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
   const categorias = ["Estratégico", "Alavancável", "Gargalo", "Não crítico"];
 
-  app.innerHTML = `
+  root.innerHTML = `
     <section class="hero">
       <h1>Ranking Fornecedores</h1>
       <p>
@@ -2204,7 +2323,9 @@ function renderFornecedoresContent(base){
   const totalValor = stats.reduce((s,x) => s + x.valorTotal, 0);
   const totalFornecedores = stats.length;
   const estrategicos = stats.filter(x => x.categoria === "Estratégico").length;
+  const alavancaveis = stats.filter(x => x.categoria === "Alavancável").length;
   const gargalos = stats.filter(x => x.categoria === "Gargalo").length;
+  const naoCriticos = stats.filter(x => x.categoria === "Não crítico").length;
 
   const performanceMedia = stats.length
     ? Math.round(stats.reduce((s,x) => s + x.performance, 0) / stats.length)
@@ -2226,7 +2347,9 @@ function renderFornecedoresContent(base){
       ${kpi("Valor analisado", money(totalValor), "blue")}
       ${kpi("Performance média", `${performanceMedia}%`, corPerformanceFornecedor(performanceMedia))}
       ${kpi("Estratégicos", estrategicos, "red")}
+      ${kpi("Alavancáveis", alavancaveis, "green")}
       ${kpi("Gargalos", gargalos, "orange")}
+      ${kpi("Não críticos", naoCriticos, "blue")}
     </section>
 
     ${renderMatrizKraljic(stats)}
@@ -2365,8 +2488,8 @@ function gerarIdLocal(){
 
 function normalizarStatusSaving(status){
   const raw = String(status || "").trim();
-
   const encontrado = STATUS_SAVING.find(x => norm(x) === norm(raw));
+
   return encontrado || "Homologação em curso";
 }
 
@@ -2540,7 +2663,10 @@ async function carregarSavingsLocal(force = false){
 }
 
 async function renderSaving(){
-  app.innerHTML = `
+  const root = ensureAppElement();
+  if(!root) return;
+
+  root.innerHTML = `
     <section class="hero">
       <h1>Ranking Saving</h1>
       <p>Carregando registros de saving...</p>
@@ -2553,7 +2679,7 @@ async function renderSaving(){
   }catch(error){
     console.error("Erro Ranking Saving:", error);
 
-    app.innerHTML = `
+    root.innerHTML = `
       <section class="hero">
         <h1>Ranking Saving</h1>
         <p>Erro ao carregar os registros de saving. Veja o Console com F12.</p>
@@ -2572,15 +2698,18 @@ function anosSavingDisponiveis(base){
 }
 
 function renderSavingView(base){
+  const root = ensureAppElement();
+  if(!root) return;
+
   const anos = anosSavingDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
 
-  app.innerHTML = `
+  root.innerHTML = `
     <section class="hero">
       <h1>Ranking Saving</h1>
       <p>
-        Controle de saving, reajuste evitado e homologações, com registros salvos no Supabase.
+        Controle de saving, reajuste evitado e homologações, com registros salvos no Supabase ou CSV local.
       </p>
     </section>
 
@@ -2633,16 +2762,6 @@ function passaFiltroSaving(x){
 
 function filterSavings(base){
   return base.filter(passaFiltroSaving);
-}
-
-function statusSavingClass(status){
-  const s = norm(status);
-
-  if(s.includes("homologado") && !s.includes("curso")) return "badge-green";
-  if(s.includes("declinado")) return "badge-red";
-  if(s.includes("curso")) return "badge-yellow";
-
-  return "badge-blue";
 }
 
 function calcularResumoSaving(data){
@@ -3047,8 +3166,9 @@ async function importarSavingCSV(){
   await carregarSavingsLocal(true);
   renderSavingView(savingData);
 }
+
 /* =========================
-   COMPATIBILIDADE DOS BOTÕES DO MENU
+   COMPATIBILIDADE DOS BOTÕES DO TOPO
 ========================= */
 
 function irDashboardGeral(){
@@ -3099,15 +3219,109 @@ function rankingSaving(){
   return renderSaving();
 }
 
-function salvarSaving(){
-  return renderSaving();
-}
-
 function imprimirPedidosAtencao(){
   return gerarRelatorioAtencao();
 }
+
+function normalizarTextoMenu(texto){
+  return norm(texto)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function acaoMenuPorTexto(texto){
+  const t = normalizarTextoMenu(texto);
+
+  if(t.includes("dashboard") || t.includes("geral")){
+    return renderGeral;
+  }
+
+  if(t.includes("fornecedor")){
+    return renderFornecedores;
+  }
+
+  if(t.includes("saving")){
+    return renderSaving;
+  }
+
+  if(t.includes("imprimir") || t.includes("pedido") || t.includes("atencao")){
+    return gerarRelatorioAtencao;
+  }
+
+  return null;
+}
+
+function blindarMenuTopo(){
+  const candidatos = document.querySelectorAll("button, a, .nav-btn, [onclick]");
+
+  candidatos.forEach(el => {
+    const texto = String(el.textContent || el.value || el.getAttribute("aria-label") || "").trim();
+    const acao = acaoMenuPorTexto(texto);
+
+    if(!acao) return;
+
+    el.onclick = event => {
+      if(event){
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      acao();
+      return false;
+    };
+  });
+}
+
+function exporFuncoesGlobais(){
+  window.renderGeral = renderGeral;
+  window.irDashboardGeral = irDashboardGeral;
+
+  window.renderFornecedores = renderFornecedores;
+  window.irRankingFornecedores = irRankingFornecedores;
+  window.irRankingFornecedor = irRankingFornecedor;
+  window.irFornecedores = irFornecedores;
+  window.renderRankingFornecedores = renderRankingFornecedores;
+  window.renderRankingFornecedor = renderRankingFornecedor;
+  window.rankingFornecedores = rankingFornecedores;
+  window.rankingFornecedor = rankingFornecedor;
+
+  window.renderSaving = renderSaving;
+  window.irRankingSaving = irRankingSaving;
+  window.irSaving = irSaving;
+  window.renderRankingSaving = renderRankingSaving;
+  window.rankingSaving = rankingSaving;
+
+  window.gerarRelatorioAtencao = gerarRelatorioAtencao;
+  window.imprimirPedidosAtencao = imprimirPedidosAtencao;
+
+  window.alterarOpcaoInflacao = alterarOpcaoInflacao;
+  window.selecionarPontoInflacao = selecionarPontoInflacao;
+  window.limparPontoInflacao = limparPontoInflacao;
+
+  window.aplicarFiltroGeralFaixa = aplicarFiltroGeralFaixa;
+  window.aplicarFiltroGeralMes = aplicarFiltroGeralMes;
+  window.limparFiltrosGeral = limparFiltrosGeral;
+
+  window.abrirModalSaving = abrirModalSaving;
+  window.fecharModalSaving = fecharModalSaving;
+  window.salvarRegistroSaving = salvarRegistroSaving;
+  window.alterarStatusSaving = alterarStatusSaving;
+  window.excluirSaving = excluirSaving;
+  window.importarSavingCSV = importarSavingCSV;
+}
+
 /* =========================
    INICIALIZAÇÃO
 ========================= */
 
-renderGeral();
+document.addEventListener("DOMContentLoaded", () => {
+  exporFuncoesGlobais();
+  blindarMenuTopo();
+  renderGeral();
+});
+
+if(document.readyState !== "loading"){
+  exporFuncoesGlobais();
+  blindarMenuTopo();
+  renderGeral();
+}
