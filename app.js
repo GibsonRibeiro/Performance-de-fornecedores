@@ -12,6 +12,7 @@ const FILES = {
 
 const SUPABASE_URL = "https://ylldnlmptfeonvrueoke.supabase.co";
 const SUPABASE_KEY = "sb_publishable_BBHqYdMh-GcJ5CEtyy9EUw_3VcM78Ry";
+
 let supabaseClient = null;
 
 function getSupabaseClient(){
@@ -22,7 +23,7 @@ function getSupabaseClient(){
     return supabaseClient;
   }
 
-  console.error("Supabase não carregou. Verifique se o script do Supabase está antes do app.js no index.html ou se a intranet bloqueou o CDN.");
+  console.error("Supabase não carregou. Verifique se o script do Supabase está antes do app.js no index.html.");
   return null;
 }
 
@@ -49,6 +50,7 @@ const OPCOES_INFLACAO = [
   { id:"Alumínio|Consolidado", label:"Alumínio — Consolidado", familia:"Alumínio", subfamilia:"" },
   { id:"Alumínio|Chapas Alumínio", label:"Chapas Alumínio", familia:"Alumínio", subfamilia:"Chapas Alumínio" },
   { id:"Alumínio|Bobina Alumínio", label:"Bobina Alumínio", familia:"Alumínio", subfamilia:"Bobina Alumínio" },
+
   { id:"Aço|Consolidado", label:"Aço — Consolidado", familia:"Aço", subfamilia:"" },
   { id:"Aço|Chapas Aço Planas", label:"Chapas Aço Planas", familia:"Aço", subfamilia:"Chapas Aço Planas" },
   { id:"Aço|Bobina Aço", label:"Bobina Aço", familia:"Aço", subfamilia:"Bobina Aço" },
@@ -56,15 +58,6 @@ const OPCOES_INFLACAO = [
   { id:"Aço|Cantoneiras", label:"Cantoneiras", familia:"Aço", subfamilia:"Cantoneiras" },
   { id:"Aço|Tubos Aço", label:"Tubos Aço", familia:"Aço", subfamilia:"Tubos Aço" }
 ];
-
-let geralData = [];
-let fornecedoresData = [];
-let savingData = [];
-let indicesData = [];
-let indicesTentouCarregar = false;
-let inflacaoPontoSelecionado = null;
-
-const app = document.getElementById("app");
 
 const CONDICOES_PAGAMENTO = {
   "6": 28,
@@ -139,6 +132,15 @@ const FORNECEDORES_ESTRATEGICOS_FIXOS = [
   "METALURGICA SCHILD LTDA"
 ];
 
+let geralData = [];
+let savingData = [];
+let indicesData = [];
+
+let indicesTentouCarregar = false;
+let inflacaoPontoSelecionado = null;
+
+const app = document.getElementById("app");
+
 function norm(text){
   return String(text || "")
     .normalize("NFD")
@@ -187,7 +189,6 @@ function parsePercent(text){
   const number = Number(value.replace(",","."));
   return Number.isFinite(number) ? number : null;
 }
-
 function parseDateBR(text){
   const raw = String(text || "").trim();
   if(!raw) return null;
@@ -202,56 +203,83 @@ function parseDateBR(text){
   if(year < 100) year += 2000;
   if(!day || !month || !year) return null;
 
-  return new Date(year, month - 1, day);
+  const date = new Date(year, month - 1, day);
+  date.setHours(0,0,0,0);
+
+  return date;
 }
 
 function normalizeDate(date){
   if(!date) return null;
+
   const d = new Date(date);
   d.setHours(0,0,0,0);
+
   return d;
 }
 
 function addDays(date, days){
   if(!date) return null;
+
   const d = new Date(date);
   d.setDate(d.getDate() + days);
   d.setHours(0,0,0,0);
+
   return d;
 }
 
 function diffDays(dateA, dateB){
   const a = normalizeDate(dateA);
   const b = normalizeDate(dateB);
+
   if(!a || !b) return null;
+
   return Math.round((a - b) / 86400000);
 }
 
 function daysUntil(date){
   if(!date) return null;
+
   const today = normalizeDate(new Date());
   const d = normalizeDate(date);
+
   return Math.ceil((d - today) / 86400000);
 }
 
 function diasTexto(dias){
-  if(dias === null) return "Sem data";
+  if(dias === null || dias === undefined) return "Sem data";
   if(dias < 0) return `Atrasado há ${Math.abs(dias)} dias`;
   if(dias === 0) return "Vence hoje";
+
   return `Faltam ${dias} dias`;
 }
 
 function monthKeyFromDate(date){
   if(!date) return "";
+
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,"0")}`;
 }
 
 function monthLabel(key){
   if(!key) return "";
+
   const [year, month] = key.split("-");
   const nomes = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
   return `${nomes[Number(month) - 1]}/${year}`;
 }
+
+function mesNumeroFromValue(valor){
+  if(!valor) return null;
+
+  const idx = MESES_FILTRO.findIndex(m => norm(m) === norm(valor));
+  if(idx >= 0) return idx + 1;
+
+  const n = Number(String(valor).replace(/\D/g,""));
+
+  return Number.isFinite(n) && n >= 1 && n <= 12 ? n : null;
+}
+
 function parseCSV(text){
   const firstLine = text.split(/\r?\n/)[0] || "";
   const delimiter = firstLine.includes(";") ? ";" : ",";
@@ -280,6 +308,7 @@ function parseCSV(text){
         row = [];
         field = "";
       }
+
       if(char === "\r" && next === "\n") i++;
     }else{
       field += char;
@@ -314,13 +343,17 @@ async function loadCSV(path, required = true){
 
   return rows.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i] || "");
+
+    headers.forEach((h, i) => {
+      obj[h] = row[i] || "";
+    });
+
     return obj;
   });
 }
 
 function get(obj, names){
-  const keys = Object.keys(obj);
+  const keys = Object.keys(obj || {});
 
   for(const name of names){
     const found = keys.find(k => norm(k) === norm(name));
@@ -337,17 +370,58 @@ function uniqueOptions(data, key){
 
 function optionList(values, label){
   return `<option value="">${label}</option>` + values.map(v => {
-    const safe = String(v).replaceAll('"',"&quot;");
-    return `<option value="${safe}">${v}</option>`;
+    const safe = esc(v);
+    return `<option value="${safe}">${esc(v)}</option>`;
   }).join("");
 }
 
-function kpi(label, value, color, action = ""){
+function getFilterValue(id){
+  const el = document.getElementById(id);
+  return el ? el.value : "";
+}
+
+function setFilterValue(id, value){
+  const el = document.getElementById(id);
+  if(!el) return;
+
+  el.value = value;
+  el.dispatchEvent(new Event("change"));
+}
+
+function attachFilterEvents(ids, callback){
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+
+    el.addEventListener("input", callback);
+    el.addEventListener("change", callback);
+  });
+}
+
+function renderFilterBar(config){
+  return `
+    <section class="filters">
+      ${config.map(item => {
+        if(item.type === "text"){
+          return `<input id="${item.id}" placeholder="${esc(item.placeholder || "")}" value="${esc(item.value || "")}">`;
+        }
+
+        return `
+          <select id="${item.id}">
+            ${optionList(item.options || [], item.label || "Selecione")}
+          </select>
+        `;
+      }).join("")}
+    </section>
+  `;
+}
+
+function kpi(label, value, color = "blue", action = ""){
   const clickable = action ? `onclick="${action}" style="cursor:pointer"` : "";
 
   return `
     <div class="kpi" ${clickable}>
-      <small>${label}</small>
+      <small>${esc(label)}</small>
       <strong class="${color}">${value}</strong>
     </div>
   `;
@@ -392,45 +466,24 @@ function barList(items, max){
   }).join("");
 }
 
-function renderFilterBar(config){
-  return `
-    <section class="filters">
-      ${config.map(item => {
-        if(item.type === "text"){
-          return `<input id="${item.id}" placeholder="${item.placeholder}" value="${item.value || ""}">`;
-        }
+function percentText(value){
+  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
 
-        return `
-          <select id="${item.id}">
-            ${optionList(item.options || [], item.label)}
-          </select>
-        `;
-      }).join("")}
-    </section>
-  `;
+  const sinal = Number(value) > 0 ? "+" : "";
+  return `${sinal}${Number(value).toFixed(2).replace(".", ",")}%`;
 }
 
-function attachFilterEvents(ids, callback){
-  ids.forEach(id => {
-    const el = document.getElementById(id);
-    if(!el) return;
-
-    el.addEventListener("input", callback);
-    el.addEventListener("change", callback);
-  });
+function kgText(value){
+  return `${Number(value || 0).toLocaleString("pt-BR", {maximumFractionDigits:0})} kg`;
 }
 
-function getFilterValue(id){
-  const el = document.getElementById(id);
-  return el ? el.value : "";
-}
+function valorPontoKg(value){
+  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
 
-function setFilterValue(id, value){
-  const el = document.getElementById(id);
-  if(!el) return;
-
-  el.value = value;
-  el.dispatchEvent(new Event("change"));
+  return `R$ ${Number(value).toLocaleString("pt-BR", {
+    minimumFractionDigits:2,
+    maximumFractionDigits:2
+  })}/kg`;
 }
 
 function anosDisponiveis(base){
@@ -442,16 +495,6 @@ function anosDisponiveis(base){
   if(!anos.includes(ANO_PADRAO)) anos.unshift(ANO_PADRAO);
 
   return [...new Set([...anos, OPCAO_TODOS_ANOS])];
-}
-
-function mesNumeroFromValue(valor){
-  if(!valor) return null;
-
-  const idx = MESES_FILTRO.findIndex(m => norm(m) === norm(valor));
-  if(idx >= 0) return idx + 1;
-
-  const n = Number(valor);
-  return Number.isFinite(n) && n >= 1 && n <= 12 ? n : null;
 }
 
 function getPeriodoMes(prefix){
@@ -474,7 +517,7 @@ function getPeriodoMes(prefix){
   return {ini, fim};
 }
 
-function passaFiltroAnoPeriodo(x, prefix){
+function passaFiltroAnoPeriodo(x, prefix, campoData = "dataRecebimentoObj"){
   const anoSelecionado = getFilterValue(`${prefix}Ano`) || ANO_PADRAO;
 
   if(anoSelecionado !== OPCAO_TODOS_ANOS && x.anoBase !== anoSelecionado){
@@ -484,9 +527,10 @@ function passaFiltroAnoPeriodo(x, prefix){
   const {ini, fim} = getPeriodoMes(prefix);
 
   if(ini !== null && fim !== null){
-    if(!x.dataRecebimentoObj) return false;
+    const data = x[campoData];
+    if(!data) return false;
 
-    const mes = x.dataRecebimentoObj.getMonth() + 1;
+    const mes = data.getMonth() + 1;
 
     if(mes < ini || mes > fim) return false;
   }
@@ -541,12 +585,12 @@ function aplicarFiltroPeriodoMes(prefix, mesKey){
     anoEl.dispatchEvent(new Event("change"));
   }
 }
-
 function classificarMascaraInflacao(mascara){
   const valor = String(mascara || "").trim();
   if(!valor) return null;
 
   const regras = [...MASCARAS_INFLACAO].sort((a,b) => b.prefixo.length - a.prefixo.length);
+
   return regras.find(regra => valor.startsWith(regra.prefixo)) || null;
 }
 
@@ -555,9 +599,21 @@ function getOpcaoInflacao(id){
 }
 
 function opcoesInflacaoHTML(){
-  return OPCOES_INFLACAO.map(opcao => `
+  const aluminio = OPCOES_INFLACAO.filter(x => x.familia === "Alumínio");
+  const aco = OPCOES_INFLACAO.filter(x => x.familia === "Aço");
+
+  const render = lista => lista.map(opcao => `
     <option value="${esc(opcao.id)}">${esc(opcao.label)}</option>
   `).join("");
+
+  return `
+    <optgroup label="Alumínio">
+      ${render(aluminio)}
+    </optgroup>
+    <optgroup label="Aço">
+      ${render(aco)}
+    </optgroup>
+  `;
 }
 
 function alterarOpcaoInflacao(){
@@ -570,12 +626,19 @@ function selecionarPontoInflacao(mes){
   renderInflacaoContent(window.inflacaoBaseAtual || []);
 }
 
+function limparPontoInflacao(){
+  inflacaoPontoSelecionado = null;
+  renderInflacaoContent(window.inflacaoBaseAtual || []);
+}
+
 function mapIndicesRows(rows){
   return rows.map(r => {
     const ano = String(get(r, ["Ano", "Year"])).trim();
+
     const mesRaw = get(r, ["Mes", "Mês", "Month"]);
     const mesNumero = Number(String(mesRaw).replace(/\D/g, "")) || mesNumeroFromValue(mesRaw);
     const mes = mesNumero ? String(mesNumero).padStart(2,"0") : "";
+
     const familia = get(r, ["Familia", "Família"]);
     const indice = get(r, ["Indice", "Índice"]);
     const valor = numberBR(get(r, ["Valor", "Valor R$/kg", "Valor BRL KG", "Valor_BRL_KG"]));
@@ -593,6 +656,7 @@ function mapIndicesRows(rows){
 
 async function ensureIndicesData(){
   if(indicesTentouCarregar) return;
+
   indicesTentouCarregar = true;
 
   try{
@@ -605,307 +669,8 @@ async function ensureIndicesData(){
 }
 
 function buscarIndiceMercado(familia, mesKey){
-  const item = indicesData.find(x => norm(x.familia) === norm(familia) && x.key === mesKey);
-  return item || null;
+  return indicesData.find(x => norm(x.familia) === norm(familia) && x.key === mesKey) || null;
 }
-
-function gerarInflacaoMensal(base, opcaoId){
-  const opcao = getOpcaoInflacao(opcaoId);
-
-  const linhas = base.filter(x => {
-    const familiaOk = x.familiaInflacao === opcao.familia;
-    const subfamiliaOk = !opcao.subfamilia || x.subfamiliaInflacao === opcao.subfamilia;
-
-    return familiaOk &&
-      subfamiliaOk &&
-      x.mesRecebimento &&
-      x.quantidade > 0 &&
-      x.valor > 0;
-  });
-
-  const grupos = Object.values(group(linhas, "mesRecebimento"))
-    .map(g => {
-      const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
-      const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
-      const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
-      const indice = buscarIndiceMercado(opcao.familia, g.nome);
-      const valorIndice = indice ? indice.valor : null;
-      const diferencaPercentual = valorIndice && valorIndice > 0 ? ((precoInterno / valorIndice) - 1) * 100 : null;
-      const impactoEstimado = valorIndice ? (precoInterno - valorIndice) * quantidadeTotal : null;
-
-      return {
-        mes:g.nome,
-        label:monthLabel(g.nome),
-        familia:opcao.familia,
-        subfamilia:opcao.subfamilia,
-        nomeOpcao:opcao.label,
-        precoInterno,
-        indiceMercado:valorIndice,
-        nomeIndice:indice?.indice || "Mercado -1",
-        diferencaPercentual,
-        impactoEstimado,
-        quantidadeTotal,
-        valorTotal
-      };
-    })
-    .sort((a,b) => a.mes.localeCompare(b.mes));
-
-  grupos.forEach((item, index) => {
-    const anterior = grupos[index - 1];
-
-    item.variacaoMesAnterior = anterior && anterior.precoInterno > 0
-      ? ((item.precoInterno / anterior.precoInterno) - 1) * 100
-      : null;
-
-    const mesmoMesAnoAnterior = grupos.find(x => {
-      const [anoAtual, mesAtual] = item.mes.split("-");
-      const [anoBase, mesBase] = x.mes.split("-");
-      return Number(anoBase) === Number(anoAtual) - 1 && mesBase === mesAtual;
-    });
-
-    item.inflacaoAnual = mesmoMesAnoAnterior && mesmoMesAnoAnterior.precoInterno > 0
-      ? ((item.precoInterno / mesmoMesAnoAnterior.precoInterno) - 1) * 100
-      : null;
-
-    item.baseAnual = mesmoMesAnoAnterior || null;
-  });
-
-  grupos.forEach((item) => {
-    const primeiro = grupos[0];
-
-    item.variacaoPeriodo = primeiro && primeiro.precoInterno > 0
-      ? ((item.precoInterno / primeiro.precoInterno) - 1) * 100
-      : null;
-
-    item.basePeriodo = primeiro || null;
-  });
-
-  return grupos;
-}
-
-function percentText(value){
-  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
-  return `${Number(value).toFixed(2).replace(".", ",")}%`;
-}
-
-function kgText(value){
-  return `${Number(value || 0).toLocaleString("pt-BR", {maximumFractionDigits:0})} kg`;
-}
-function valorPontoKg(value){
-  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
-  return money(value).replace("R$", "R$").replace(/\s/g, "");
-}
-
-function renderInflacaoLineChart(rows, selectedMes){
-  if(!rows.length){
-    return `<div class="empty-state">Nenhuma compra encontrada para esta família no período filtrado.</div>`;
-  }
-
-  const width = 980;
-  const height = 270;
-  const margin = {top:34, right:28, bottom:46, left:62};
-  const chartW = width - margin.left - margin.right;
-  const chartH = height - margin.top - margin.bottom;
-
-  const valores = [];
-
-  rows.forEach(x => {
-    if(x.precoInterno > 0) valores.push(x.precoInterno);
-    if(x.indiceMercado > 0) valores.push(x.indiceMercado);
-  });
-
-  if(!valores.length){
-    return `<div class="empty-state">Não há valores suficientes para montar o gráfico.</div>`;
-  }
-
-  const max = Math.max(...valores) * 1.10;
-  const minRaw = Math.min(...valores) * 0.94;
-  const min = Math.max(0, minRaw);
-  const denom = max - min || 1;
-
-  const xPos = index => rows.length === 1
-    ? margin.left + chartW / 2
-    : margin.left + (index / (rows.length - 1)) * chartW;
-
-  const yPos = value => margin.top + chartH - ((value - min) / denom) * chartH;
-
-  const pointsInterno = rows
-    .filter(x => x.precoInterno > 0)
-    .map(x => {
-      const idx = rows.indexOf(x);
-      return `${xPos(idx)},${yPos(x.precoInterno)}`;
-    }).join(" ");
-
-  const pointsMercado = rows
-    .filter(x => x.indiceMercado > 0)
-    .map(x => {
-      const idx = rows.indexOf(x);
-      return `${xPos(idx)},${yPos(x.indiceMercado)}`;
-    }).join(" ");
-
-  const grid = [0,1,2,3].map(i => {
-    const y = margin.top + (i / 3) * chartH;
-    const value = max - (i / 3) * denom;
-
-    return `
-      <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#1e293b" stroke-width="1" />
-      <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" fill="#94a3b8" font-size="10">${valorPontoKg(value)}</text>
-    `;
-  }).join("");
-
-  const labelsMes = rows.map((x, idx) => `
-    <text x="${xPos(idx)}" y="${height - 20}" text-anchor="middle" fill="${x.mes === selectedMes ? "#f8fafc" : "#94a3b8"}" font-size="11" font-weight="${x.mes === selectedMes ? "700" : "500"}">${esc(x.label)}</text>
-  `).join("");
-
-  const labelsValorInterno = rows.map((x, idx) => {
-    const y = yPos(x.precoInterno);
-    const selected = x.mes === selectedMes;
-
-    return `
-      <text
-        x="${xPos(idx)}"
-        y="${Math.max(14, y - 12)}"
-        text-anchor="middle"
-        fill="${selected ? "#f8fafc" : "#cbd5e1"}"
-        font-size="${selected ? "12" : "11"}"
-        font-weight="${selected ? "800" : "700"}"
-        style="cursor:pointer;"
-        onclick="selecionarPontoInflacao('${x.mes}')"
-      >${valorPontoKg(x.precoInterno)}</text>
-    `;
-  }).join("");
-
-  const pontosInternos = rows.map((x, idx) => {
-    const selected = x.mes === selectedMes;
-    const r = selected ? 7 : 5;
-
-    return `
-      <circle
-        cx="${xPos(idx)}"
-        cy="${yPos(x.precoInterno)}"
-        r="${r}"
-        fill="${selected ? "#f8fafc" : "#38bdf8"}"
-        stroke="#38bdf8"
-        stroke-width="${selected ? "4" : "2"}"
-        style="cursor:pointer;"
-        onclick="selecionarPontoInflacao('${x.mes}')"
-      >
-        <title>${x.label} • Linshalm: ${moneyKg(x.precoInterno)} • Volume: ${kgText(x.quantidadeTotal)}</title>
-      </circle>
-    `;
-  }).join("");
-
-  const pontosMercado = rows.filter(x => x.indiceMercado > 0).map(x => {
-    const idx = rows.indexOf(x);
-    const selected = x.mes === selectedMes;
-
-    return `
-      <circle
-        cx="${xPos(idx)}"
-        cy="${yPos(x.indiceMercado)}"
-        r="${selected ? "6" : "4"}"
-        fill="#f59e0b"
-        stroke="#020617"
-        stroke-width="2"
-        style="cursor:pointer;"
-        onclick="selecionarPontoInflacao('${x.mes}')"
-      >
-        <title>${x.label} • ${esc(x.nomeIndice)}: ${moneyKg(x.indiceMercado)}</title>
-      </circle>
-    `;
-  }).join("");
-
-  const linhaMercado = pointsMercado
-    ? `<polyline points="${pointsMercado}" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />`
-    : "";
-
-  const legendaMercado = pointsMercado
-    ? `<span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:3px;background:#f59e0b;display:inline-block;border-radius:999px;"></i>Mercado / LME -1</span>`
-    : `<span style="color:#94a3b8;">Índice externo não carregado</span>`;
-
-  return `
-    <div style="width:100%;overflow-x:auto;margin-top:12px;">
-      <svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:760px;display:block;">
-        <rect x="0" y="0" width="${width}" height="${height}" rx="14" fill="#020617" />
-        ${grid}
-        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#334155" />
-        <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#334155" />
-        <polyline points="${pointsInterno}" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-        ${linhaMercado}
-        ${pontosInternos}
-        ${pontosMercado}
-        ${labelsValorInterno}
-        ${labelsMes}
-        <text x="${margin.left}" y="18" fill="#e5e7eb" font-size="12" font-weight="700">R$/kg</text>
-      </svg>
-    </div>
-
-    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:10px;color:#cbd5e1;font-size:12px;">
-      <span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:3px;background:#38bdf8;display:inline-block;border-radius:999px;"></i>Linshalm R$/kg</span>
-      ${legendaMercado}
-      <span style="color:#94a3b8;">Clique em um ponto para atualizar os cards.</span>
-    </div>
-  `;
-}
-
-function renderInflacaoContent(base){
-  const container = document.getElementById("inflacaoContent");
-  if(!container) return;
-
-  const opcaoId = getFilterValue("inflacaoFamilia") || "Alumínio|Consolidado";
-  const opcao = getOpcaoInflacao(opcaoId);
-  const data = gerarInflacaoMensal(base, opcaoId);
-
-  if(!data.length){
-    container.innerHTML = `
-      <section class="kpis" style="margin-top:18px;">
-        ${kpi("Família analisada", opcao.label, "blue")}
-        ${kpi("Preço médio Linshalm", "—", "blue")}
-        ${kpi("Volume analisado", "—", "blue")}
-        ${kpi("Inflação anual", "—", "yellow")}
-      </section>
-      <div class="empty-state">Nenhuma compra encontrada para ${esc(opcao.label)} no período filtrado.</div>
-    `;
-    return;
-  }
-
-  const selecionado = data.find(x => x.mes === inflacaoPontoSelecionado) || data[data.length - 1];
-  inflacaoPontoSelecionado = selecionado.mes;
-
-  const temIndice = data.some(x => x.indiceMercado > 0);
-  const baseAnualTexto = selecionado.baseAnual ? `${selecionado.label} vs ${selecionado.baseAnual.label}` : "Sem base anual";
-  const basePeriodoTexto = selecionado.basePeriodo ? `${selecionado.basePeriodo.label} → ${selecionado.label}` : "Sem base";
-  const impactoColor = selecionado.impactoEstimado > 0 ? "red" : "green";
-  const difColor = selecionado.diferencaPercentual > 0 ? "red" : "green";
-  const anualColor = selecionado.inflacaoAnual > 0 ? "orange" : "green";
-  const periodoColor = selecionado.variacaoPeriodo > 0 ? "orange" : "green";
-
-  const aviso = temIndice
-    ? `<div class="subtle-note">Comparativo externo carregado a partir de <b>data/indices.csv</b>. O valor deve estar em R$/kg e já alinhado como mercado -1.</div>`
-    : `<div class="subtle-note">Sem <b>data/indices.csv</b> carregado. O painel segue normalmente mostrando apenas a inflação interna Linshalm.</div>`;
-
-  container.innerHTML = `
-    <section class="kpis" style="margin-top:18px;">
-      ${kpi("Ponto analisado", selecionado.label, "blue")}
-      ${kpi("Preço médio Linshalm", moneyKg(selecionado.precoInterno), "blue")}
-      ${kpi("Volume analisado", kgText(selecionado.quantidadeTotal), "blue")}
-      ${kpi("Inflação anual", percentText(selecionado.inflacaoAnual), anualColor)}
-      ${kpi("Base anual", baseAnualTexto, "blue")}
-      ${kpi("Variação no período", percentText(selecionado.variacaoPeriodo), periodoColor)}
-      ${kpi("Base do período", basePeriodoTexto, "blue")}
-      ${kpi("Índice mercado -1", selecionado.indiceMercado ? moneyKg(selecionado.indiceMercado) : "Não carregado", selecionado.indiceMercado ? "orange" : "yellow")}
-      ${kpi("Diferença vs mercado", percentText(selecionado.diferencaPercentual), difColor)}
-      ${kpi("Impacto estimado", selecionado.impactoEstimado !== null ? money(selecionado.impactoEstimado) : "—", impactoColor)}
-    </section>
-
-    ${renderInflacaoLineChart(data, selecionado.mes)}
-    ${aviso}
-  `;
-}
-
-/* =========================
-   MOTOR GERAL
-========================= */
 
 function calcularFaixa(previsaoInicialObj, dataRecebimentoObj){
   if(dataRecebimentoObj) return "Entregue";
@@ -918,6 +683,7 @@ function calcularFaixa(previsaoInicialObj, dataRecebimentoObj){
   if(hoje < previsao) return "Dentro do prazo";
   if(hoje < limite) return "Alerta";
   if(diffDays(hoje, limite) === 0) return "Crítico";
+
   return "Atrasado";
 }
 
@@ -967,22 +733,28 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       descricaoProduto: get(r, ["Descrição Produto", "Descricao Produto", "Desc Produto"]),
       fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
       comprador: get(r, ["Nome Comprador", "Comprador"]),
+
       mascaraEntrada,
       familiaInflacao: inflacao?.familia || "",
       subfamiliaInflacao: inflacao?.subfamilia || "",
+
       quantidade,
       precoUnitario,
       valor,
+
       condicaoPagamento,
       prazoPagamento,
+
       faixa,
       entregue,
       entregueNoPrazo,
       atraso: entregue ? diasAtrasoEntrega : atrasoAberto,
+
       dataRecebimento,
       dataRecebimentoObj,
       mesRecebimento: monthKeyFromDate(dataRecebimentoObj),
       mesRecebimentoNum: dataRecebimentoObj ? dataRecebimentoObj.getMonth() + 1 : null,
+
       previsaoInicial,
       previsaoInicialObj,
       dataLimiteOperacionalObj
@@ -1009,6 +781,522 @@ async function ensureGeralData(){
   }
 
   geralData = carregados;
+}
+
+function filtrarBaseInflacao(base, opcaoId){
+  const opcao = getOpcaoInflacao(opcaoId);
+
+  return base.filter(x => {
+    const familiaOk = x.familiaInflacao === opcao.familia;
+    const subfamiliaOk = !opcao.subfamilia || x.subfamiliaInflacao === opcao.subfamilia;
+
+    return familiaOk &&
+      subfamiliaOk &&
+      x.mesRecebimento &&
+      x.quantidade > 0 &&
+      x.valor > 0;
+  });
+}
+
+function gerarInflacaoMensal(base, opcaoId){
+  const opcao = getOpcaoInflacao(opcaoId);
+  const linhas = filtrarBaseInflacao(base, opcaoId);
+
+  const grupos = Object.values(group(linhas, "mesRecebimento"))
+    .map(g => {
+      const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
+      const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
+      const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
+
+      const indice = buscarIndiceMercado(opcao.familia, g.nome);
+      const valorIndice = indice ? indice.valor : null;
+
+      const diferencaPercentual = valorIndice && valorIndice > 0
+        ? ((precoInterno / valorIndice) - 1) * 100
+        : null;
+
+      const impactoEstimado = valorIndice
+        ? (precoInterno - valorIndice) * quantidadeTotal
+        : null;
+
+      return {
+        mes:g.nome,
+        label:monthLabel(g.nome),
+        familia:opcao.familia,
+        subfamilia:opcao.subfamilia,
+        nomeOpcao:opcao.label,
+        precoInterno,
+        indiceMercado:valorIndice,
+        nomeIndice:indice?.indice || "Mercado -1",
+        diferencaPercentual,
+        impactoEstimado,
+        quantidadeTotal,
+        valorTotal
+      };
+    })
+    .sort((a,b) => a.mes.localeCompare(b.mes));
+
+  grupos.forEach((item, index) => {
+    const anterior = grupos[index - 1];
+
+    item.variacaoMesAnterior = anterior && anterior.precoInterno > 0
+      ? ((item.precoInterno / anterior.precoInterno) - 1) * 100
+      : null;
+
+    const mesmoMesAnoAnterior = grupos.find(x => {
+      const [anoAtual, mesAtual] = item.mes.split("-");
+      const [anoBase, mesBase] = x.mes.split("-");
+
+      return Number(anoBase) === Number(anoAtual) - 1 && mesBase === mesAtual;
+    });
+
+    item.inflacaoAnual = mesmoMesAnoAnterior && mesmoMesAnoAnterior.precoInterno > 0
+      ? ((item.precoInterno / mesmoMesAnoAnterior.precoInterno) - 1) * 100
+      : null;
+
+    item.baseAnual = mesmoMesAnoAnterior || null;
+  });
+
+  grupos.forEach(item => {
+    const primeiro = grupos[0];
+
+    item.variacaoPeriodo = primeiro && primeiro.precoInterno > 0
+      ? ((item.precoInterno / primeiro.precoInterno) - 1) * 100
+      : null;
+
+    item.basePeriodo = primeiro || null;
+  });
+
+  return grupos;
+}
+
+function calcularResumoInflacaoPeriodo(base, opcaoId){
+  const linhas = filtrarBaseInflacao(base, opcaoId);
+  const opcao = getOpcaoInflacao(opcaoId);
+
+  const valorTotal = linhas.reduce((s,x) => s + x.valor, 0);
+  const quantidadeTotal = linhas.reduce((s,x) => s + x.quantidade, 0);
+  const precoMedio = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
+
+  const meses = gerarInflacaoMensal(base, opcaoId);
+  const primeiro = meses[0] || null;
+  const ultimo = meses[meses.length - 1] || null;
+
+  const variacaoPeriodo = primeiro && ultimo && primeiro.precoInterno > 0
+    ? ((ultimo.precoInterno / primeiro.precoInterno) - 1) * 100
+    : null;
+
+  const indicesValidos = meses.filter(x => x.indiceMercado > 0 && x.quantidadeTotal > 0);
+
+  const indicePonderado = indicesValidos.length
+    ? indicesValidos.reduce((s,x) => s + (x.indiceMercado * x.quantidadeTotal), 0) /
+      indicesValidos.reduce((s,x) => s + x.quantidadeTotal, 0)
+    : null;
+
+  const diferencaVsMercado = indicePonderado && indicePonderado > 0
+    ? ((precoMedio / indicePonderado) - 1) * 100
+    : null;
+
+  const impactoEstimado = indicePonderado
+    ? (precoMedio - indicePonderado) * quantidadeTotal
+    : null;
+
+  return {
+    modo:"periodo",
+    opcao,
+    linhas,
+    meses,
+    valorTotal,
+    quantidadeTotal,
+    precoMedio,
+    primeiro,
+    ultimo,
+    variacaoPeriodo,
+    indicePonderado,
+    diferencaVsMercado,
+    impactoEstimado
+  };
+}
+function enriquecerInflacaoComBaseComparativa(meses, opcaoId, baseComparativa){
+  if(!meses.length) return meses;
+
+  const comparativaMensal = gerarInflacaoMensal(baseComparativa || [], opcaoId);
+
+  meses.forEach(item => {
+    const [anoAtual, mesAtual] = item.mes.split("-");
+
+    const mesmoMesAnoAnterior = comparativaMensal.find(x => {
+      const [anoBase, mesBase] = x.mes.split("-");
+      return Number(anoBase) === Number(anoAtual) - 1 && mesBase === mesAtual;
+    });
+
+    item.inflacaoAnual = mesmoMesAnoAnterior && mesmoMesAnoAnterior.precoInterno > 0
+      ? ((item.precoInterno / mesmoMesAnoAnterior.precoInterno) - 1) * 100
+      : null;
+
+    item.baseAnual = mesmoMesAnoAnterior || null;
+  });
+
+  return meses;
+}
+
+function calcularInflacaoAnualPeriodo(baseFiltrada, opcaoId, baseComparativa){
+  const anoSelecionado = getFilterValue("geralAno") || ANO_PADRAO;
+
+  if(anoSelecionado === OPCAO_TODOS_ANOS){
+    return null;
+  }
+
+  const anoAtual = Number(anoSelecionado);
+  const anoAnterior = anoAtual - 1;
+
+  if(!anoAtual || !anoAnterior){
+    return null;
+  }
+
+  const linhasAtuais = filtrarBaseInflacao(baseFiltrada, opcaoId);
+
+  if(!linhasAtuais.length){
+    return null;
+  }
+
+  const mesesAtuais = [...new Set(linhasAtuais.map(x => x.mesRecebimentoNum).filter(Boolean))];
+
+  if(!mesesAtuais.length){
+    return null;
+  }
+
+  const linhasAnoAnterior = filtrarBaseInflacao(baseComparativa || [], opcaoId)
+    .filter(x => {
+      return Number(x.anoBase) === anoAnterior &&
+        mesesAtuais.includes(x.mesRecebimentoNum);
+    });
+
+  const valorAtual = linhasAtuais.reduce((s,x) => s + x.valor, 0);
+  const qtdAtual = linhasAtuais.reduce((s,x) => s + x.quantidade, 0);
+  const precoAtual = qtdAtual > 0 ? valorAtual / qtdAtual : 0;
+
+  const valorAnterior = linhasAnoAnterior.reduce((s,x) => s + x.valor, 0);
+  const qtdAnterior = linhasAnoAnterior.reduce((s,x) => s + x.quantidade, 0);
+  const precoAnterior = qtdAnterior > 0 ? valorAnterior / qtdAnterior : 0;
+
+  if(!precoAtual || !precoAnterior){
+    return null;
+  }
+
+  return {
+    valor: ((precoAtual / precoAnterior) - 1) * 100,
+    precoAtual,
+    precoAnterior,
+    anoAtual,
+    anoAnterior,
+    mesesComparados: mesesAtuais.length
+  };
+}
+
+function resumoBaseAnualPeriodo(info){
+  if(!info) return "Sem base anual";
+
+  return `${info.anoAtual} vs ${info.anoAnterior}`;
+}
+
+function textoBasePeriodo(resumo){
+  if(!resumo || !resumo.primeiro || !resumo.ultimo) return "Sem base";
+
+  if(resumo.primeiro.mes === resumo.ultimo.mes){
+    return resumo.primeiro.label;
+  }
+
+  return `${resumo.primeiro.label} → ${resumo.ultimo.label}`;
+}
+
+function corPercentual(value){
+  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "blue";
+  if(Number(value) > 0) return "orange";
+  if(Number(value) < 0) return "green";
+  return "blue";
+}
+
+function corMercado(value){
+  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "blue";
+  if(Number(value) > 0) return "red";
+  if(Number(value) < 0) return "green";
+  return "blue";
+}
+
+function corImpacto(value){
+  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "blue";
+  if(Number(value) > 0) return "red";
+  if(Number(value) < 0) return "green";
+  return "blue";
+}
+
+function renderInflacaoCardsPeriodo(resumo, inflacaoAnualPeriodo){
+  return `
+    <section class="kpis inflacao-kpis">
+      ${kpi("Modo de análise", "Período consolidado", "blue")}
+      ${kpi("Família analisada", resumo.opcao.label, "blue")}
+      ${kpi("Preço médio Linshalm", moneyKg(resumo.precoMedio), "blue")}
+      ${kpi("Volume analisado", kgText(resumo.quantidadeTotal), "blue")}
+      ${kpi("Valor comprado", money(resumo.valorTotal), "blue")}
+      ${kpi("Inflação anual", inflacaoAnualPeriodo ? percentText(inflacaoAnualPeriodo.valor) : "Sem base anual", corPercentual(inflacaoAnualPeriodo?.valor))}
+      ${kpi("Base anual", resumoBaseAnualPeriodo(inflacaoAnualPeriodo), "blue")}
+      ${kpi("Variação no período", percentText(resumo.variacaoPeriodo), corPercentual(resumo.variacaoPeriodo))}
+      ${kpi("Base do período", textoBasePeriodo(resumo), "blue")}
+      ${kpi("Índice mercado -1", resumo.indicePonderado ? moneyKg(resumo.indicePonderado) : "Não carregado", resumo.indicePonderado ? "orange" : "yellow")}
+      ${kpi("Diferença vs mercado", percentText(resumo.diferencaVsMercado), corMercado(resumo.diferencaVsMercado))}
+      ${kpi("Impacto estimado", resumo.impactoEstimado !== null ? money(resumo.impactoEstimado) : "—", corImpacto(resumo.impactoEstimado))}
+    </section>
+  `;
+}
+
+function renderInflacaoCardsPonto(ponto){
+  const baseAnualTexto = ponto.baseAnual
+    ? `${ponto.label} vs ${ponto.baseAnual.label}`
+    : "Sem base anual";
+
+  const basePeriodoTexto = ponto.basePeriodo
+    ? `${ponto.basePeriodo.label} → ${ponto.label}`
+    : "Sem base";
+
+  return `
+    <section class="kpis inflacao-kpis">
+      ${kpi("Modo de análise", "Mês selecionado", "blue")}
+      ${kpi("Ponto analisado", ponto.label, "blue")}
+      ${kpi("Preço médio Linshalm", moneyKg(ponto.precoInterno), "blue")}
+      ${kpi("Volume analisado", kgText(ponto.quantidadeTotal), "blue")}
+      ${kpi("Valor comprado", money(ponto.valorTotal), "blue")}
+      ${kpi("Inflação anual", percentText(ponto.inflacaoAnual), corPercentual(ponto.inflacaoAnual))}
+      ${kpi("Base anual", baseAnualTexto, "blue")}
+      ${kpi("Variação desde início", percentText(ponto.variacaoPeriodo), corPercentual(ponto.variacaoPeriodo))}
+      ${kpi("Base do período", basePeriodoTexto, "blue")}
+      ${kpi("Índice mercado -1", ponto.indiceMercado ? moneyKg(ponto.indiceMercado) : "Não carregado", ponto.indiceMercado ? "orange" : "yellow")}
+      ${kpi("Diferença vs mercado", percentText(ponto.diferencaPercentual), corMercado(ponto.diferencaPercentual))}
+      ${kpi("Impacto estimado", ponto.impactoEstimado !== null ? money(ponto.impactoEstimado) : "—", corImpacto(ponto.impactoEstimado))}
+    </section>
+  `;
+}
+
+function renderInflacaoLineChart(rows, selectedMes){
+  if(!rows.length){
+    return `<div class="empty-state">Nenhuma compra encontrada para esta família no período filtrado.</div>`;
+  }
+
+  const width = 980;
+  const height = 285;
+  const margin = {top:42, right:30, bottom:50, left:66};
+  const chartW = width - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+
+  const valores = [];
+
+  rows.forEach(x => {
+    if(x.precoInterno > 0) valores.push(x.precoInterno);
+    if(x.indiceMercado > 0) valores.push(x.indiceMercado);
+  });
+
+  if(!valores.length){
+    return `<div class="empty-state">Não há valores suficientes para montar o gráfico.</div>`;
+  }
+
+  const max = Math.max(...valores) * 1.12;
+  const minRaw = Math.min(...valores) * 0.94;
+  const min = Math.max(0, minRaw);
+  const denom = max - min || 1;
+
+  const xPos = index => rows.length === 1
+    ? margin.left + chartW / 2
+    : margin.left + (index / (rows.length - 1)) * chartW;
+
+  const yPos = value => margin.top + chartH - ((value - min) / denom) * chartH;
+
+  const pointsInterno = rows
+    .filter(x => x.precoInterno > 0)
+    .map(x => {
+      const idx = rows.indexOf(x);
+      return `${xPos(idx)},${yPos(x.precoInterno)}`;
+    }).join(" ");
+
+  const pointsMercado = rows
+    .filter(x => x.indiceMercado > 0)
+    .map(x => {
+      const idx = rows.indexOf(x);
+      return `${xPos(idx)},${yPos(x.indiceMercado)}`;
+    }).join(" ");
+
+  const grid = [0,1,2,3].map(i => {
+    const y = margin.top + (i / 3) * chartH;
+    const value = max - (i / 3) * denom;
+
+    return `
+      <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" class="chart-grid-line" />
+      <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" class="chart-axis-text">${valorPontoKg(value)}</text>
+    `;
+  }).join("");
+
+  const labelsMes = rows.map((x, idx) => {
+    const selected = x.mes === selectedMes;
+
+    return `
+      <text
+        x="${xPos(idx)}"
+        y="${height - 22}"
+        text-anchor="middle"
+        class="chart-axis-text ${selected ? "chart-axis-selected" : ""}"
+      >${esc(x.label)}</text>
+    `;
+  }).join("");
+
+  const labelsValorInterno = rows.map((x, idx) => {
+    const y = yPos(x.precoInterno);
+    const selected = x.mes === selectedMes;
+    const labelY = y < 54 ? y + 22 : y - 12;
+
+    return `
+      <text
+        x="${xPos(idx)}"
+        y="${labelY}"
+        text-anchor="middle"
+        class="chart-point-label ${selected ? "chart-point-label-selected" : ""}"
+        onclick="selecionarPontoInflacao('${x.mes}')"
+      >${valorPontoKg(x.precoInterno)}</text>
+    `;
+  }).join("");
+
+  const pontosInternos = rows.map((x, idx) => {
+    const selected = x.mes === selectedMes;
+    const r = selected ? 8 : 5;
+
+    return `
+      <circle
+        cx="${xPos(idx)}"
+        cy="${yPos(x.precoInterno)}"
+        r="${r}"
+        class="chart-point-interno ${selected ? "chart-point-selected" : ""}"
+        onclick="selecionarPontoInflacao('${x.mes}')"
+      >
+        <title>${x.label} • Linshalm: ${moneyKg(x.precoInterno)} • Volume: ${kgText(x.quantidadeTotal)}</title>
+      </circle>
+    `;
+  }).join("");
+
+  const pontosMercado = rows.filter(x => x.indiceMercado > 0).map(x => {
+    const idx = rows.indexOf(x);
+    const selected = x.mes === selectedMes;
+
+    return `
+      <circle
+        cx="${xPos(idx)}"
+        cy="${yPos(x.indiceMercado)}"
+        r="${selected ? "6" : "4"}"
+        class="chart-point-mercado"
+        onclick="selecionarPontoInflacao('${x.mes}')"
+      >
+        <title>${x.label} • ${esc(x.nomeIndice)}: ${moneyKg(x.indiceMercado)}</title>
+      </circle>
+    `;
+  }).join("");
+
+  const linhaMercado = pointsMercado
+    ? `<polyline points="${pointsMercado}" fill="none" class="chart-line-mercado" />`
+    : "";
+
+  const legendaMercado = pointsMercado
+    ? `<span><i class="legend-line mercado"></i>Mercado / LME -1</span>`
+    : `<span class="muted">Índice externo não carregado</span>`;
+
+  return `
+    <div class="inflacao-chart-wrap">
+      <svg viewBox="0 0 ${width} ${height}" class="inflacao-chart-svg">
+        <rect x="0" y="0" width="${width}" height="${height}" rx="16" class="chart-bg" />
+        ${grid}
+
+        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" class="chart-axis-line" />
+        <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" class="chart-axis-line" />
+
+        <polyline points="${pointsInterno}" fill="none" class="chart-line-interno" />
+        ${linhaMercado}
+
+        ${pontosInternos}
+        ${pontosMercado}
+        ${labelsValorInterno}
+        ${labelsMes}
+
+        <text x="${margin.left}" y="23" class="chart-title-small">R$/kg</text>
+      </svg>
+    </div>
+
+    <div class="inflacao-legend">
+      <span><i class="legend-line interno"></i>Linshalm R$/kg</span>
+      ${legendaMercado}
+      <span class="muted">Clique em um ponto para abrir a visão do mês.</span>
+    </div>
+  `;
+}
+
+function renderInflacaoContent(base){
+  const container = document.getElementById("inflacaoContent");
+  if(!container) return;
+
+  const opcaoId = getFilterValue("inflacaoFamilia") || "Alumínio|Consolidado";
+  const opcao = getOpcaoInflacao(opcaoId);
+
+  const baseComparativa = window.inflacaoBaseComparativaAtual || base;
+
+  let data = gerarInflacaoMensal(base, opcaoId);
+  data = enriquecerInflacaoComBaseComparativa(data, opcaoId, baseComparativa);
+
+  const resumo = calcularResumoInflacaoPeriodo(base, opcaoId);
+  const inflacaoAnualPeriodo = calcularInflacaoAnualPeriodo(base, opcaoId, baseComparativa);
+
+  if(!data.length){
+    container.innerHTML = `
+      <section class="kpis inflacao-kpis">
+        ${kpi("Modo de análise", "Período consolidado", "blue")}
+        ${kpi("Família analisada", opcao.label, "blue")}
+        ${kpi("Preço médio Linshalm", "—", "blue")}
+        ${kpi("Volume analisado", "—", "blue")}
+        ${kpi("Inflação anual", "—", "yellow")}
+      </section>
+
+      <div class="empty-state">
+        Nenhuma compra encontrada para <b>${esc(opcao.label)}</b> no período filtrado.
+      </div>
+    `;
+    return;
+  }
+
+  const pontoSelecionado = inflacaoPontoSelecionado
+    ? data.find(x => x.mes === inflacaoPontoSelecionado)
+    : null;
+
+  const cards = pontoSelecionado
+    ? renderInflacaoCardsPonto(pontoSelecionado)
+    : renderInflacaoCardsPeriodo(resumo, inflacaoAnualPeriodo);
+
+  const temIndice = data.some(x => x.indiceMercado > 0);
+
+  const aviso = temIndice
+    ? `<div class="inflacao-note">Comparativo externo carregado a partir de <b>data/indices.csv</b>. O valor deve estar em R$/kg e já alinhado como mercado -1.</div>`
+    : `<div class="inflacao-note">Sem <b>data/indices.csv</b> carregado. O painel segue normalmente mostrando apenas a inflação interna Linshalm.</div>`;
+
+  const acaoPonto = pontoSelecionado
+    ? `<button class="btn secondary" type="button" onclick="limparPontoInflacao()">Voltar para consolidado do período</button>`
+    : `<button class="btn secondary" type="button" disabled>Visão consolidada do período</button>`;
+
+  container.innerHTML = `
+    <div class="inflacao-study-header">
+      <div>
+        <strong>${pontoSelecionado ? `Estudo do mês: ${esc(pontoSelecionado.label)}` : "Estudo do período consolidado"}</strong>
+        <span>${esc(opcao.label)}</span>
+      </div>
+      ${acaoPonto}
+    </div>
+
+    ${cards}
+    ${renderInflacaoLineChart(data, pontoSelecionado?.mes || null)}
+    ${aviso}
+  `;
 }
 /* =========================
    DASHBOARD GERAL
@@ -1100,6 +1388,30 @@ function filterGeral(base){
       (!fornecedor || x.fornecedor === fornecedor) &&
       (!pedido || norm(x.pedido).includes(pedido)) &&
       (!faixa || x.faixa === faixa);
+  });
+}
+
+function filterGeralComparativaInflacao(base){
+  const comprador = getFilterValue("geralComprador");
+  const fornecedor = getFilterValue("geralFornecedor");
+  const pedido = norm(getFilterValue("geralPedido"));
+  const faixa = getFilterValue("geralFaixa");
+  const {ini, fim} = getPeriodoMes("geral");
+
+  return base.filter(x => {
+    if(comprador && x.comprador !== comprador) return false;
+    if(fornecedor && x.fornecedor !== fornecedor) return false;
+    if(pedido && !norm(x.pedido).includes(pedido)) return false;
+    if(faixa && x.faixa !== faixa) return false;
+
+    if(ini !== null && fim !== null){
+      if(!x.dataRecebimentoObj) return false;
+
+      const mes = x.dataRecebimentoObj.getMonth() + 1;
+      if(mes < ini || mes > fim) return false;
+    }
+
+    return true;
   });
 }
 
@@ -1263,12 +1575,14 @@ async function gerarRelatorioAtencao(){
   win.document.write(html);
   win.document.close();
 }
-
 function renderGeralContent(base){
   const data = filterGeral(base);
+
   window.inflacaoBaseAtual = data;
+  window.inflacaoBaseComparativaAtual = filterGeralComparativaInflacao(base);
 
   const content = document.getElementById("geralContent");
+  if(!content) return;
 
   const countFaixa = name => data.filter(x => norm(x.faixa) === norm(name)).length;
 
@@ -1277,6 +1591,7 @@ function renderGeralContent(base){
   const alerta = countFaixa("Alerta");
   const dentro = countFaixa("Dentro do prazo");
   const entregues = countFaixa("Entregue");
+
   const totalComprado = data.reduce((sum, x) => sum + x.valor, 0);
 
   const prazoMedioPonderado = totalComprado > 0
@@ -1355,46 +1670,65 @@ function renderGeralContent(base){
 
       <div class="panel">
         <h2>Performance por comprador</h2>
-        ${performanceComprador.map(x => barLine(x.nome, x.perf, "bar-blue", `${x.perf}%`, 100)).join("")}
+        ${performanceComprador.length ? performanceComprador.map(x => {
+          return barLine(x.nome, x.perf, "bar-blue", `${x.perf}%`, 100);
+        }).join("") : `<div class="empty-state">Sem dados de entrega para o período.</div>`}
       </div>
 
       <div class="panel">
         <h2>Top fornecedores por valor</h2>
-        ${topFornecedores.map(x => barLine(x.nome, x.valor, "bar-red", money(x.valor), topFornecedores[0]?.valor || 1)).join("")}
+        ${topFornecedores.length ? topFornecedores.map(x => {
+          return barLine(x.nome, x.valor, "bar-red", money(x.valor), topFornecedores[0]?.valor || 1);
+        }).join("") : `<div class="empty-state">Sem fornecedores no período filtrado.</div>`}
       </div>
 
       <div class="panel">
         <h2>Ranking de compras por comprador</h2>
-        ${rankingCompras.map(x => barLine(x.nome, x.valor, "bar-red", money(x.valor), rankingCompras[0]?.valor || 1)).join("")}
+        ${rankingCompras.length ? rankingCompras.map(x => {
+          return barLine(x.nome, x.valor, "bar-red", money(x.valor), rankingCompras[0]?.valor || 1);
+        }).join("") : `<div class="empty-state">Sem compras no período filtrado.</div>`}
       </div>
     </section>
 
     <section class="panel" style="margin-bottom:22px;">
-      <h2>Total recebido por mês</h2>
+      <div class="panel-title-row">
+        <div>
+          <h2>Total recebido por mês</h2>
+          <p>Visão de recebimentos pelo valor total das linhas entregues no período.</p>
+        </div>
+
+        <button class="btn secondary" type="button" onclick="gerarRelatorioAtencao()">
+          Imprimir pedidos em atenção
+        </button>
+      </div>
 
       <div class="month-chart">
-        ${recebidosPorMes.map(x => `
+        ${recebidosPorMes.length ? recebidosPorMes.map(x => `
           <div class="month-bar ${mesEstaNoPeriodoAtivo(x.mes, "geral") ? "active" : ""}" onclick="aplicarFiltroGeralMes('${x.mes}')">
             <div class="month-bar-value">${money(x.valor)}</div>
             <div class="month-bar-fill" style="height:${Math.max(18,(x.valor / maxMes) * 210)}px"></div>
             <div class="month-bar-label">${x.label}</div>
           </div>
-        `).join("")}
+        `).join("") : `<div class="empty-state">Sem recebimentos no período filtrado.</div>`}
       </div>
     </section>
 
-    <section class="panel" style="margin-bottom:22px;">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+    <section class="panel inflacao-panel" style="margin-bottom:22px;">
+      <div class="inflacao-header">
         <div>
           <h2>Acompanhamento inflacionário — Aço e Alumínio</h2>
-          <p style="margin:6px 0 0;color:#94a3b8;font-size:13px;">
-            Preço médio real Linshalm em R$/kg por família ou subfamília. Clique em um ponto da linha para estudar o mês.
+          <p>
+            Preço médio Linshalm em R$/kg, calculado por valor comprado dividido pela quantidade comprada.
+            A visão inicial é o consolidado do período; ao clicar em um ponto, os cards mudam para o mês selecionado.
           </p>
         </div>
 
-        <select id="inflacaoFamilia" onchange="alterarOpcaoInflacao()" style="max-width:280px;">
-          ${opcoesInflacaoHTML()}
-        </select>
+        <div class="inflacao-controls">
+          <label for="inflacaoFamilia">Família / subfamília</label>
+          <select id="inflacaoFamilia" onchange="alterarOpcaoInflacao()">
+            ${opcoesInflacaoHTML()}
+          </select>
+        </div>
       </div>
 
       <div id="inflacaoContent"></div>
@@ -1429,7 +1763,7 @@ function renderGeralContent(base){
               <td>${esc(x.descricaoProduto || "—")}</td>
               <td><b>${esc(x.fornecedor || "—")}</b></td>
               <td>${esc(x.comprador || "—")}</td>
-              <td>${x.quantidade}</td>
+              <td>${Number(x.quantidade || 0).toLocaleString("pt-BR", {maximumFractionDigits:2})}</td>
               <td>${money(x.precoUnitario)}</td>
               <td>${money(x.valor)}</td>
               <td>${esc(x.condicaoPagamento || "—")}</td>
@@ -1442,99 +1776,121 @@ function renderGeralContent(base){
           `).join("")}
         </tbody>
       </table>
+
+      ${data.length > 1500 ? `
+        <div class="table-note">
+          Exibindo as primeiras 1.500 linhas do período filtrado para manter o painel leve.
+        </div>
+      ` : ""}
     </section>
   `;
 
   renderInflacaoContent(data);
 }
 /* =========================
-   RANKING FORNECEDORES — GERADO PELO GERAL.CSV
+   RANKING FORNECEDORES / KRALJIC
 ========================= */
 
-function statusFornecedorClass(status){
-  const s = norm(status);
-
-  if(s === "estrategico") return "estrategico";
-  if(s === "alavancavel") return "alavancavel";
-  if(s === "gargalo") return "gargalo";
-
-  return "nao-critico";
+function fornecedorKey(nome){
+  return norm(nome)
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function perfColor(perf){
-  if(perf === null) return "orange";
-  if(perf >= 85) return "green";
-  if(perf >= 70) return "yellow";
-  return "red";
+function isFornecedorEstrategico(nome){
+  const chave = fornecedorKey(nome);
+
+  return FORNECEDORES_ESTRATEGICOS_FIXOS.some(fixo => fornecedorKey(fixo) === chave);
 }
 
-function perfText(perf){
-  return perf === null ? "Sem medição" : `${perf}%`;
-}
+function classificarFornecedorKraljic(stats){
+  if(isFornecedorEstrategico(stats.nome)){
+    return "Estratégico";
+  }
 
-function classificarFornecedorAutomatico(fornecedor, valor, performance, pedidos){
-  const nome = norm(fornecedor);
-  const ehEstrategico = FORNECEDORES_ESTRATEGICOS_FIXOS.some(item => norm(item) === nome);
+  if(stats.pedidosUnicos <= 1){
+    return "Não crítico";
+  }
 
-  if(ehEstrategico) return "Estratégico";
-  if(pedidos <= 1) return "Não crítico";
-  if(performance !== null && performance >= 60 && valor >= 100000) return "Alavancável";
-  if(performance !== null && performance >= 60 && valor < 100000) return "Não crítico";
+  if(stats.performance >= 60 && stats.valorTotal >= 100000){
+    return "Alavancável";
+  }
+
+  if(stats.performance >= 60 && stats.valorTotal < 100000){
+    return "Não crítico";
+  }
 
   return "Gargalo";
 }
 
-function filtrarLinhasFornecedores(base){
-  const comprador = getFilterValue("fornComprador");
-  const fornecedor = getFilterValue("fornFornecedor");
+function categoriaFornecedorClass(categoria){
+  const c = norm(categoria);
 
-  return base.filter(x => {
-    return passaFiltroAnoPeriodo(x, "forn") &&
-      (!comprador || x.comprador === comprador) &&
-      (!fornecedor || x.fornecedor === fornecedor);
-  });
+  if(c.includes("estrategico")) return "badge-red";
+  if(c.includes("alavancavel")) return "badge-green";
+  if(c.includes("gargalo")) return "badge-orange";
+  if(c.includes("nao critico")) return "badge-blue";
+
+  return "badge-gray";
 }
 
-function criarRankingFornecedores(linhas){
-  return Object.values(group(linhas, "fornecedor"))
-    .map(g => {
-      const valor = g.items.reduce((sum,x) => sum + x.valor, 0);
+function corPerformanceFornecedor(value){
+  if(value >= 80) return "green";
+  if(value >= 60) return "yellow";
+  return "red";
+}
 
-      const entregues = g.items.filter(x => x.entregue);
-      const ok = entregues.filter(x => x.entregueNoPrazo).length;
-      const performance = entregues.length ? Math.round((ok / entregues.length) * 100) : null;
+function calcularRankingFornecedores(base){
+  return Object.values(group(base.filter(x => x.fornecedor), "fornecedor")).map(g => {
+    const pedidos = [...new Set(g.items.map(x => x.pedido).filter(Boolean))];
 
-      const pedidos = new Set(g.items.map(x => x.pedido).filter(Boolean)).size;
+    const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
+    const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
 
-      const compradorPrincipal = Object.values(group(g.items, "comprador"))
-        .map(c => ({
-          nome:c.nome,
-          valor:c.items.reduce((sum,x) => sum + x.valor, 0)
-        }))
-        .sort((a,b) => b.valor - a.valor)[0]?.nome || "Não informado";
+    const entregues = g.items.filter(x => x.entregue);
+    const entreguesNoPrazo = entregues.filter(x => x.entregueNoPrazo).length;
 
-      return {
-        fornecedor:g.nome,
-        valor,
-        comprador:compradorPrincipal,
-        performance,
-        pedidos,
-        plano:"",
-        situacao:classificarFornecedorAutomatico(g.nome, valor, performance, pedidos)
-      };
-    })
-    .sort((a,b) => b.valor - a.valor)
-    .map((x,i) => ({
-      ...x,
-      classificacao:i + 1
-    }));
+    const performance = entregues.length
+      ? Math.round((entreguesNoPrazo / entregues.length) * 100)
+      : 0;
+
+    const atrasoMedio = g.items.length
+      ? Math.round(g.items.reduce((s,x) => s + (x.atraso || 0), 0) / g.items.length)
+      : 0;
+
+    const prazoMedioPagamento = valorTotal > 0
+      ? Math.round(g.items.reduce((s,x) => s + ((x.prazoPagamento || 0) * x.valor), 0) / valorTotal)
+      : 0;
+
+    const compradores = [...new Set(g.items.map(x => x.comprador).filter(Boolean))];
+
+    const stats = {
+      nome:g.nome,
+      itens:g.items,
+      linhas:g.items.length,
+      pedidosUnicos:pedidos.length,
+      valorTotal,
+      quantidadeTotal,
+      entregues:entregues.length,
+      entreguesNoPrazo,
+      performance,
+      atrasoMedio,
+      prazoMedioPagamento,
+      compradores
+    };
+
+    stats.categoria = classificarFornecedorKraljic(stats);
+
+    return stats;
+  }).sort((a,b) => b.valorTotal - a.valorTotal);
 }
 
 async function renderFornecedores(){
   app.innerHTML = `
     <section class="hero">
-      <h1>Ranking de Fornecedores</h1>
-      <p>Carregando matriz Kraljic...</p>
+      <h1>Ranking Fornecedores</h1>
+      <p>Carregando fornecedores a partir da base geral...</p>
     </section>
   `;
 
@@ -1546,8 +1902,8 @@ async function renderFornecedores(){
 
     app.innerHTML = `
       <section class="hero">
-        <h1>Ranking de Fornecedores</h1>
-        <p>Erro ao gerar o ranking a partir das bases históricas. Veja o Console com F12.</p>
+        <h1>Ranking Fornecedores</h1>
+        <p>Erro ao carregar a base de fornecedores. Veja o Console com F12.</p>
       </section>
     `;
   }
@@ -1557,12 +1913,14 @@ function renderFornecedoresView(base){
   const anos = anosDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
-  const situacoes = ["Estratégico", "Alavancável", "Gargalo", "Não crítico"];
+  const categorias = ["Estratégico", "Alavancável", "Gargalo", "Não crítico"];
 
   app.innerHTML = `
     <section class="hero">
-      <h1>Ranking de Fornecedores / Matriz Kraljic</h1>
-      <p>Ranking gerado automaticamente a partir do geral.csv e históricos por ano/período.</p>
+      <h1>Ranking Fornecedores</h1>
+      <p>
+        Classificação estratégica dos fornecedores com base em valor comprado, performance de entrega e fornecedores estratégicos fixos.
+      </p>
     </section>
 
     ${renderFilterBar([
@@ -1571,9 +1929,7 @@ function renderFornecedoresView(base){
       {type:"select", id:"fornMesFinal", label:"Mês final", options:MESES_FILTRO},
       {type:"select", id:"fornComprador", label:"Todos compradores", options:compradores},
       {type:"select", id:"fornFornecedor", label:"Todos fornecedores", options:fornecedores},
-      {type:"select", id:"fornSituacao", label:"Todas situações", options:situacoes},
-      {type:"select", id:"fornPerf", label:"Todas performances", options:["Sem medição", "Boa ≥ 85%", "Alerta 60% a 84%", "Crítica < 60%"]},
-      {type:"text", id:"fornBusca", placeholder:"Buscar fornecedor"}
+      {type:"select", id:"fornCategoria", label:"Todas categorias", options:categorias}
     ])}
 
     <div id="fornecedoresContent"></div>
@@ -1582,399 +1938,115 @@ function renderFornecedoresView(base){
   aplicarPeriodoPadrao("forn");
 
   attachFilterEvents(
-    ["fornAno","fornMesInicial","fornMesFinal","fornComprador","fornFornecedor","fornSituacao","fornPerf","fornBusca"],
+    ["fornAno","fornMesInicial","fornMesFinal","fornComprador","fornFornecedor","fornCategoria"],
     () => renderFornecedoresContent(base)
   );
 
   renderFornecedoresContent(base);
 }
 
-function filterFornecedores(base){
-  const situacao = getFilterValue("fornSituacao");
-  const perf = getFilterValue("fornPerf");
-  const busca = norm(getFilterValue("fornBusca"));
+function filterFornecedoresBase(base){
+  const comprador = getFilterValue("fornComprador");
+  const fornecedor = getFilterValue("fornFornecedor");
 
   return base.filter(x => {
-    const fullText = norm(`${x.fornecedor} ${x.comprador} ${x.situacao}`);
-
-    const passaPerf =
-      !perf ||
-      (perf === "Sem medição" && x.performance === null) ||
-      (perf === "Boa ≥ 85%" && x.performance !== null && x.performance >= 85) ||
-      (perf === "Alerta 60% a 84%" && x.performance !== null && x.performance >= 60 && x.performance < 85) ||
-      (perf === "Crítica < 60%" && x.performance !== null && x.performance < 60);
-
-    return (!situacao || x.situacao === situacao) &&
-      passaPerf &&
-      (!busca || fullText.includes(busca));
-  }).sort((a,b) => a.classificacao - b.classificacao);
-}
-
-function aplicarFiltroFornecedorSituacao(situacao){
-  setFilterValue("fornSituacao", situacao);
-}
-
-function aplicarFiltroFornecedorPerf(valor){
-  setFilterValue("fornPerf", valor);
-}
-
-function limparFiltrosFornecedores(){
-  setFilterValue("fornAno", ANO_PADRAO);
-  setFilterValue("fornMesInicial", "");
-  setFilterValue("fornMesFinal", "");
-  setFilterValue("fornComprador", "");
-  setFilterValue("fornFornecedor", "");
-  setFilterValue("fornSituacao", "");
-  setFilterValue("fornPerf", "");
-  setFilterValue("fornBusca", "");
-}
-
-function renderFornecedoresContent(base){
-  const linhasFiltradas = filtrarLinhasFornecedores(base);
-  const ranking = criarRankingFornecedores(linhasFiltradas);
-  const data = filterFornecedores(ranking);
-  const content = document.getElementById("fornecedoresContent");
-
-  const situacoesPadrao = ["Estratégico", "Alavancável", "Gargalo", "Não crítico"];
-  const total = data.reduce((sum, x) => sum + x.valor, 0);
-
-  content.innerHTML = `
-    <section class="kpis">
-      ${kpi("Fornecedores", data.length, "blue", "limparFiltrosFornecedores()")}
-      ${kpi("Valor total", money(total), "blue")}
-      ${kpi("Estratégicos", data.filter(x => x.situacao === "Estratégico").length, "green", "aplicarFiltroFornecedorSituacao('Estratégico')")}
-      ${kpi("Alavancáveis", data.filter(x => x.situacao === "Alavancável").length, "blue", "aplicarFiltroFornecedorSituacao('Alavancável')")}
-      ${kpi("Gargalos", data.filter(x => x.situacao === "Gargalo").length, "red", "aplicarFiltroFornecedorSituacao('Gargalo')")}
-      ${kpi("Não críticos", data.filter(x => x.situacao === "Não crítico").length, "orange", "aplicarFiltroFornecedorSituacao('Não crítico')")}
-      ${kpi("Sem medição", data.filter(x => x.performance === null).length, "orange", "aplicarFiltroFornecedorPerf('Sem medição')")}
-    </section>
-
-    <section class="matrix">
-      ${situacoesPadrao.map(s => {
-        const groupItems = data.filter(x => x.situacao === s);
-        const value = groupItems.reduce((sum, x) => sum + x.valor, 0);
-
-        return `
-          <div class="quad ${statusFornecedorClass(s)}">
-            <h2>${s}</h2>
-            <div class="quad-meta">${groupItems.length} fornecedores • ${money(value)}</div>
-
-            <div class="supplier-grid">
-              ${groupItems.map(x => `
-                <div class="supplier">
-                  <h3>${x.classificacao}. ${esc(x.fornecedor)}</h3>
-                  <div class="row"><span>${esc(x.comprador || "—")}</span><b>${money(x.valor)}</b></div>
-                  <div class="row">
-                    <span>Entrega</span>
-                    <span class="${perfColor(x.performance)}">${perfText(x.performance)}</span>
-                  </div>
-                  <div class="row">
-                    <span>Pedidos</span>
-                    <b>${x.pedidos}</b>
-                  </div>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        `;
-      }).join("")}
-    </section>
-  `;
-}
-
-/* =========================
-   RANKING SAVING INPUTÁVEL — SUPABASE
-========================= */
-
-const SAVING_TABLE = "savings";
-let savingRegistros = [];
-
-function uid(){
-  return "SV" + Date.now() + Math.floor(Math.random() * 9999);
-}
-
-function statusAtivoSaving(x){
-  return norm(x.status) !== "declinado";
-}
-
-function dbToSaving(row){
-  return {
-    id: row.id || uid(),
-    categoria: row.categoria || "Saving",
-    tipo: row.tipo || "Spot",
-    data: row.data || "",
-    comprador: row.comprador || "",
-    codigo: row.codigo || "",
-    descricao: row.descricao || "",
-    fornecedorAtual: row.fornecedor_atual || "",
-    status: row.status || "Homologação em curso",
-    quantidade: row.quantidade || "",
-    precoAtual: row.preco_atual || "",
-    competidorA: row.competidor_a || "",
-    precoCompetidorA: row.preco_competidor_a || "",
-    competidorB: row.competidor_b || "",
-    precoCompetidorB: row.preco_competidor_b || "",
-    competidorC: row.competidor_c || "",
-    precoCompetidorC: row.preco_competidor_c || "",
-    reajusteSolicitado: row.reajuste_solicitado || "",
-    reajusteAcordado: row.reajuste_acordado || "",
-    observacao: row.observacao || ""
-  };
-}
-
-function savingToDb(r){
-  return {
-    id: r.id || uid(),
-    categoria: r.categoria || "Saving",
-    tipo: r.tipo || "Spot",
-    data: r.data || "",
-    comprador: r.comprador || "",
-    codigo: r.codigo || "",
-    descricao: r.descricao || "",
-    fornecedor_atual: r.fornecedorAtual || "",
-    status: r.status || "Homologação em curso",
-    quantidade: r.quantidade || "",
-    preco_atual: r.precoAtual || "",
-    competidor_a: r.competidorA || "",
-    preco_competidor_a: r.precoCompetidorA || "",
-    competidor_b: r.competidorB || "",
-    preco_competidor_b: r.precoCompetidorB || "",
-    competidor_c: r.competidorC || "",
-    preco_competidor_c: r.precoCompetidorC || "",
-    reajuste_solicitado: r.reajusteSolicitado || "",
-    reajuste_acordado: r.reajusteAcordado || "",
-    observacao: r.observacao || ""
-  };
-}
-
-async function carregarSavingsLocal(){
-  const client = getSupabaseClient();
-
-  if(!client){
-    savingRegistros = [];
-    return;
-  }
-
-  try{
-    const { data, error } = await client
-      .from(SAVING_TABLE)
-      .select("*")
-      .order("created_at", { ascending:false });
-
-    if(error){
-      throw error;
-    }
-
-    savingRegistros = (data || []).map(dbToSaving);
-  }catch(error){
-    console.error("Erro ao carregar savings do Supabase:", error);
-    savingRegistros = [];
-    alert("Erro ao carregar savings do Supabase. Veja o Console com F12.");
-  }
-}
-
-async function salvarSavingsLocal(){
-  // Mantido por compatibilidade. No Supabase, as gravações são feitas por operação.
-}
-function calcularSavingRegistro(r){
-  const categoria = r.categoria || "Saving";
-  const tipo = r.tipo || "Spot";
-  const quantidade = numberBR(r.quantidade);
-  const precoAtual = numberBR(r.precoAtual);
-
-  if(categoria === "Saving"){
-    const competidores = [
-      {nome:r.competidorA, preco:numberBR(r.precoCompetidorA)},
-      {nome:r.competidorB, preco:numberBR(r.precoCompetidorB)},
-      {nome:r.competidorC, preco:numberBR(r.precoCompetidorC)}
-    ]
-    .filter(x => x.nome && x.preco > 0)
-    .sort((a,b) => a.preco - b.preco);
-
-    const vencedor = competidores[0]?.nome || "";
-    const precoNegociado = competidores[0]?.preco || 0;
-
-    const savingUnitario = precoAtual - precoNegociado;
-    const savingMensal = quantidade * savingUnitario;
-    const savingTotal = tipo === "Anual" ? savingMensal * 12 : savingMensal;
-    const custoReferencia = tipo === "Anual" ? quantidade * precoAtual * 12 : quantidade * precoAtual;
-    const reducaoPercentual = precoAtual > 0 ? (savingUnitario / precoAtual) * 100 : 0;
-
-    return {
-      ...r,
-      vencedor,
-      precoNegociado,
-      savingUnitario,
-      savingMensal,
-      savingTotal,
-      costAvoidanceUnitario:0,
-      costAvoidanceMensal:0,
-      costAvoidanceTotal:0,
-      impactoTotal:savingTotal,
-      custoReferencia,
-      reducaoPercentual
-    };
-  }
-
-  const reajusteSolicitado = numberBR(r.reajusteSolicitado);
-  const reajusteAcordado = numberBR(r.reajusteAcordado);
-
-  const precoSolicitado = precoAtual * (1 + reajusteSolicitado / 100);
-  const precoAcordado = precoAtual * (1 + reajusteAcordado / 100);
-
-  const costAvoidanceUnitario = precoSolicitado - precoAcordado;
-  const costAvoidanceMensal = quantidade * costAvoidanceUnitario;
-  const costAvoidanceTotal = costAvoidanceMensal * 12;
-  const custoReferencia = quantidade * precoSolicitado * 12;
-  const reducaoPercentual = reajusteSolicitado - reajusteAcordado;
-
-  return {
-    ...r,
-    vencedor:r.fornecedorAtual,
-    precoNegociado:precoAcordado,
-    precoSolicitado,
-    precoAcordado,
-    savingUnitario:0,
-    savingMensal:0,
-    savingTotal:0,
-    costAvoidanceUnitario,
-    costAvoidanceMensal,
-    costAvoidanceTotal,
-    impactoTotal:costAvoidanceTotal,
-    custoReferencia,
-    reducaoPercentual
-  };
-}
-
-function savingsCalculados(){
-  return savingRegistros.map(calcularSavingRegistro);
-}
-
-async function renderSaving(){
-  app.innerHTML = `
-    <section class="hero">
-      <h1>Ranking de Saving</h1>
-      <p>Carregando savings do Supabase...</p>
-    </section>
-  `;
-
-  await carregarSavingsLocal();
-  renderSavingView(savingsCalculados());
-}
-
-function renderSavingView(base){
-  const compradores = uniqueOptions(base, "comprador");
-  const status = uniqueOptions(base, "status");
-  const categorias = uniqueOptions(base, "categoria");
-
-  app.innerHTML = `
-    <section class="hero">
-      <h1>Ranking de Saving</h1>
-      <p>Controle de saving, reajustes e cost avoidance conectado ao Supabase.</p>
-    </section>
-
-    <section class="saving-actions">
-      <button class="action-btn" onclick="abrirModalSaving('Saving')">+ Novo Saving</button>
-      <button class="action-btn" onclick="abrirModalSaving('Reajuste')">+ Novo Reajuste</button>
-
-      <label class="action-btn secondary file-btn">
-        Importar CSV
-        <input type="file" accept=".csv" onchange="importarSavingCSV(event)">
-      </label>
-
-      <button class="action-btn secondary" onclick="exportarSavingCSV()">Baixar CSV consolidado</button>
-    </section>
-
-    ${renderFilterBar([
-      {type:"select", id:"savingCategoria", label:"Todas categorias", options:categorias},
-      {type:"select", id:"savingComprador", label:"Todos compradores", options:compradores},
-      {type:"select", id:"savingStatus", label:"Todos status", options:status},
-      {type:"text", id:"savingBusca", placeholder:"Buscar código, item ou fornecedor"}
-    ])}
-
-    <div id="savingContent"></div>
-    <div id="savingModal" class="modal-root"></div>
-  `;
-
-  attachFilterEvents(
-    ["savingCategoria","savingComprador","savingStatus","savingBusca"],
-    () => renderSavingContent(savingsCalculados())
-  );
-
-  renderSavingContent(base);
-}
-
-function filterSaving(base){
-  const categoria = getFilterValue("savingCategoria");
-  const comprador = getFilterValue("savingComprador");
-  const status = getFilterValue("savingStatus");
-  const busca = norm(getFilterValue("savingBusca"));
-
-  return base.filter(x => {
-    const fullText = norm(`${x.codigo} ${x.descricao} ${x.fornecedorAtual} ${x.vencedor} ${x.comprador} ${x.status} ${x.categoria}`);
-
-    return (!categoria || x.categoria === categoria) &&
+    return passaFiltroAnoPeriodo(x, "forn") &&
       (!comprador || x.comprador === comprador) &&
-      (!status || x.status === status) &&
-      (!busca || fullText.includes(busca));
+      (!fornecedor || x.fornecedor === fornecedor);
   });
 }
 
-function renderSavingContent(base){
-  const data = filterSaving(base);
-  const ativos = data.filter(statusAtivoSaving);
+function renderMatrizKraljic(stats){
+  const categorias = {
+    "Estratégico": stats.filter(x => x.categoria === "Estratégico"),
+    "Alavancável": stats.filter(x => x.categoria === "Alavancável"),
+    "Gargalo": stats.filter(x => x.categoria === "Gargalo"),
+    "Não crítico": stats.filter(x => x.categoria === "Não crítico")
+  };
 
-  const homologados = ativos.filter(x => norm(x.status) === "homologado");
-  const pipeline = ativos.filter(x => norm(x.status).includes("curso"));
+  const card = (titulo, lista, cls, descricao) => {
+    const valor = lista.reduce((s,x) => s + x.valorTotal, 0);
 
-  const savingHomologado = homologados.reduce((s,x) => s + x.savingTotal, 0);
-  const savingPipeline = pipeline.reduce((s,x) => s + x.savingTotal, 0);
+    return `
+      <div class="kraljic-card ${cls}">
+        <div>
+          <h3>${esc(titulo)}</h3>
+          <p>${esc(descricao)}</p>
+        </div>
 
-  const caHomologado = homologados.reduce((s,x) => s + x.costAvoidanceTotal, 0);
-  const caPipeline = pipeline.reduce((s,x) => s + x.costAvoidanceTotal, 0);
+        <strong>${lista.length}</strong>
+        <span>${money(valor)}</span>
 
-  const impactoHomologado = savingHomologado + caHomologado;
-  const impactoPipeline = savingPipeline + caPipeline;
+        <ul>
+          ${lista.slice(0,5).map(x => `<li>${esc(x.nome)}</li>`).join("")}
+          ${lista.length > 5 ? `<li>+ ${lista.length - 5} fornecedor(es)</li>` : ""}
+        </ul>
+      </div>
+    `;
+  };
 
-  const porComprador = Object.values(group(ativos, "comprador"))
-    .map(g => ({
-      nome:g.nome,
-      valor:g.items.reduce((s,x) => s + x.savingTotal + x.costAvoidanceTotal, 0)
-    }))
-    .sort((a,b) => b.valor - a.valor);
+  return `
+    <section class="kraljic-grid">
+      ${card("Estratégico", categorias["Estratégico"], "estrategico", "Fornecedores definidos como estratégicos para a operação.")}
+      ${card("Alavancável", categorias["Alavancável"], "alavancavel", "Boa performance e alto valor comprado. Espaço para negociação.")}
+      ${card("Gargalo", categorias["Gargalo"], "gargalo", "Baixa performance ou maior risco de fornecimento. Exige atenção.")}
+      ${card("Não crítico", categorias["Não crítico"], "nao-critico", "Menor impacto ou baixo volume de pedidos.")}
+    </section>
+  `;
+}
 
-  const maxComprador = Math.max(...porComprador.map(x => Math.abs(x.valor)), 1);
-  const maxResumo = Math.max(Math.abs(savingHomologado), Math.abs(caHomologado), Math.abs(impactoHomologado), 1);
+function renderFornecedoresContent(base){
+  const dataBase = filterFornecedoresBase(base);
+  const categoriaFiltro = getFilterValue("fornCategoria");
 
-  const content = document.getElementById("savingContent");
+  let stats = calcularRankingFornecedores(dataBase);
+
+  if(categoriaFiltro){
+    stats = stats.filter(x => x.categoria === categoriaFiltro);
+  }
+
+  const totalValor = stats.reduce((s,x) => s + x.valorTotal, 0);
+  const totalFornecedores = stats.length;
+  const estrategicos = stats.filter(x => x.categoria === "Estratégico").length;
+  const gargalos = stats.filter(x => x.categoria === "Gargalo").length;
+
+  const performanceMedia = stats.length
+    ? Math.round(stats.reduce((s,x) => s + x.performance, 0) / stats.length)
+    : 0;
+
+  const topValor = [...stats].sort((a,b) => b.valorTotal - a.valorTotal).slice(0,10);
+  const topRisco = [...stats].sort((a,b) => {
+    if(a.performance !== b.performance) return a.performance - b.performance;
+    return b.valorTotal - a.valorTotal;
+  }).slice(0,10);
+
+  const content = document.getElementById("fornecedoresContent");
+  if(!content) return;
 
   content.innerHTML = `
     <section class="kpis">
-      ${kpi("Registros", data.length, "blue", "limparFiltrosSaving()")}
-      ${kpi("Saving homologado", money(savingHomologado), "green")}
-      ${kpi("Saving pipeline", money(savingPipeline), "orange")}
-      ${kpi("Cost Avoidance homologado", money(caHomologado), "green")}
-      ${kpi("Cost Avoidance pipeline", money(caPipeline), "orange")}
-      ${kpi("Impacto homologado", money(impactoHomologado), "blue")}
-      ${kpi("Impacto pipeline", money(impactoPipeline), "orange")}
-      ${kpi("Declinados", data.filter(x => norm(x.status) === "declinado").length, "red")}
+      ${kpi("Fornecedores analisados", totalFornecedores, "blue")}
+      ${kpi("Valor analisado", money(totalValor), "blue")}
+      ${kpi("Performance média", `${performanceMedia}%`, corPerformanceFornecedor(performanceMedia))}
+      ${kpi("Estratégicos", estrategicos, "red")}
+      ${kpi("Gargalos", gargalos, "orange")}
     </section>
+
+    ${renderMatrizKraljic(stats)}
 
     <section class="panel-grid">
       <div class="panel">
-        <h2>Impacto por comprador</h2>
-        ${
-          porComprador.length
-          ? porComprador.map(x => barLine(x.nome, Math.abs(x.valor), "bar-blue", money(x.valor), maxComprador)).join("")
-          : `<div class="empty-state">Nenhum lançamento ativo para exibir.</div>`
-        }
+        <h2>Top fornecedores por valor</h2>
+        ${topValor.length ? topValor.map(x => {
+          return barLine(x.nome, x.valorTotal, "bar-red", money(x.valorTotal), topValor[0]?.valorTotal || 1);
+        }).join("") : `<div class="empty-state">Sem fornecedores para os filtros selecionados.</div>`}
       </div>
 
       <div class="panel">
-        <h2>Resumo homologado</h2>
-        ${barLine("Saving", Math.abs(savingHomologado), "bar-green", money(savingHomologado), maxResumo)}
-        ${barLine("Cost Avoidance", Math.abs(caHomologado), "bar-orange", money(caHomologado), maxResumo)}
-        ${barLine("Impacto total", Math.abs(impactoHomologado), "bar-blue", money(impactoHomologado), maxResumo)}
+        <h2>Fornecedores com maior atenção</h2>
+        ${topRisco.length ? topRisco.map(x => {
+          return barLine(`${x.nome} • ${x.performance}%`, 100 - x.performance, "bar-orange", `${x.performance}%`, 100);
+        }).join("") : `<div class="empty-state">Sem fornecedores para os filtros selecionados.</div>`}
       </div>
     </section>
 
@@ -1982,469 +2054,688 @@ function renderSavingContent(base){
       <table>
         <thead>
           <tr>
+            <th>Fornecedor</th>
             <th>Categoria</th>
-            <th>Tipo</th>
-            <th>Data</th>
-            <th>Comprador</th>
-            <th>Código</th>
-            <th>Descrição</th>
-            <th>Fornecedor Atual</th>
-            <th>Vencedor</th>
-            <th>Status</th>
-            <th>Qtd</th>
-            <th>Preço Atual</th>
-            <th>Preço Final</th>
-            <th>Saving Total</th>
-            <th>Cost Avoidance</th>
-            <th>Redução</th>
-            <th>Ações</th>
+            <th>Valor comprado</th>
+            <th>Pedidos</th>
+            <th>Linhas</th>
+            <th>Performance</th>
+            <th>Entregues</th>
+            <th>Atraso médio</th>
+            <th>Prazo médio pgto</th>
+            <th>Compradores</th>
           </tr>
         </thead>
 
         <tbody>
-          ${
-            data.length
-            ? data.map(x => `
-              <tr class="${norm(x.status) === "declinado" ? "declined-row" : ""}">
-                <td>${esc(x.categoria || "—")}</td>
-                <td>${esc(x.tipo || "—")}</td>
-                <td>${esc(x.data || "—")}</td>
-                <td>${esc(x.comprador || "—")}</td>
-                <td>${esc(x.codigo || "—")}</td>
-                <td><b>${esc(x.descricao || "—")}</b></td>
-                <td>${esc(x.fornecedorAtual || "—")}</td>
-                <td>${esc(x.vencedor || "—")}</td>
-                <td>
-                  <select class="status-select" onchange="alterarStatusSaving('${x.id}', this.value)">
-                    ${["Homologação em curso","Homologado","Declinado"].map(s => `
-                      <option value="${s}" ${x.status === s ? "selected" : ""}>${s}</option>
-                    `).join("")}
-                  </select>
-                </td>
-                <td>${esc(x.quantidade || "—")}</td>
-                <td>${money(numberBR(x.precoAtual))}</td>
-                <td>${money(x.precoNegociado)}</td>
-                <td>${money(x.savingTotal)}</td>
-                <td>${money(x.costAvoidanceTotal)}</td>
-                <td>${Number(x.reducaoPercentual || 0).toFixed(2)}%</td>
-                <td>
-                  <button class="mini-btn" onclick="excluirSaving('${x.id}')">Excluir</button>
-                </td>
-              </tr>
-            `).join("")
-            : `
-              <tr>
-                <td colspan="16">
-                  <div class="empty-state">Nenhum saving lançado ainda. Use “+ Novo Saving”, “+ Novo Reajuste” ou importe um CSV.</div>
-                </td>
-              </tr>
-            `
-          }
+          ${stats.map(x => `
+            <tr>
+              <td><b>${esc(x.nome)}</b></td>
+              <td><span class="badge ${categoriaFornecedorClass(x.categoria)}">${esc(x.categoria)}</span></td>
+              <td>${money(x.valorTotal)}</td>
+              <td>${x.pedidosUnicos}</td>
+              <td>${x.linhas}</td>
+              <td><b class="${corPerformanceFornecedor(x.performance)}">${x.performance}%</b></td>
+              <td>${x.entreguesNoPrazo}/${x.entregues}</td>
+              <td>${x.atrasoMedio} dias</td>
+              <td>${x.prazoMedioPagamento} dias</td>
+              <td>${esc(x.compradores.join(", ") || "—")}</td>
+            </tr>
+          `).join("")}
         </tbody>
       </table>
     </section>
   `;
 }
-function limparFiltrosSaving(){
-  setFilterValue("savingCategoria", "");
-  setFilterValue("savingComprador", "");
-  setFilterValue("savingStatus", "");
-  setFilterValue("savingBusca", "");
+/* =========================
+   RANKING SAVING / SUPABASE
+========================= */
+
+const STATUS_SAVING = [
+  "Homologação em curso",
+  "Homologado",
+  "Declinado"
+];
+
+const TIPOS_SAVING = [
+  "Saving",
+  "Cost Avoidance",
+  "Reajuste evitado",
+  "Negociação comercial",
+  "Troca de fornecedor",
+  "Homologação"
+];
+
+function jsArg(value){
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, " ");
 }
 
-function abrirModalSaving(categoria){
-  const modal = document.getElementById("savingModal");
-  const titulo = categoria === "Saving" ? "Incluir Saving" : "Incluir Reajuste / Cost Avoidance";
+function keyClean(text){
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-zA-Z0-9]+/g," ")
+    .toLowerCase()
+    .trim();
+}
 
-  modal.innerHTML = `
-    <div class="modal-overlay" onclick="fecharModalSaving(event)">
-      <div class="modal-container" onclick="event.stopPropagation()">
-        <div class="modal-header">
-          <div>
-            <h2>${titulo}</h2>
-            <p>${categoria === "Saving" ? "Informe os competidores. O menor preço será considerado vencedor automaticamente." : "Informe o reajuste solicitado e o reajuste acordado. O portal calcula o cost avoidance."}</p>
-          </div>
-          <button class="modal-close" onclick="fecharModalSaving()">×</button>
-        </div>
+function getSaving(row, names){
+  const keys = Object.keys(row || {});
 
-        <div class="modal-body">
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Data</label>
-              <input id="svData" placeholder="dd/mm/aaaa">
-            </div>
+  for(const name of names){
+    const target = keyClean(name);
+    const found = keys.find(k => keyClean(k) === target);
+    if(found) return row[found];
+  }
 
-            <div class="form-group">
-              <label>Comprador</label>
-              <input id="svComprador" placeholder="Nome do comprador">
-            </div>
+  return "";
+}
 
-            <div class="form-group">
-              <label>Código</label>
-              <input id="svCodigo" placeholder="Código do item">
-            </div>
+function parseDateSmart(text){
+  const raw = String(text || "").trim();
 
-            <div class="form-group">
-              <label>Descrição</label>
-              <input id="svDescricao" placeholder="Descrição do item">
-            </div>
+  if(!raw) return null;
 
-            <div class="form-group">
-              <label>Fornecedor atual</label>
-              <input id="svFornecedorAtual" placeholder="Fornecedor atual">
-            </div>
+  if(/^\d{4}-\d{2}-\d{2}/.test(raw)){
+    const [year, month, day] = raw.slice(0,10).split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setHours(0,0,0,0);
+    return date;
+  }
 
-            <div class="form-group">
-              <label>Status</label>
-              <select id="svStatus">
-                <option>Homologação em curso</option>
-                <option>Homologado</option>
-                <option>Declinado</option>
-              </select>
-            </div>
+  return parseDateBR(raw);
+}
 
-            <div class="form-group">
-              <label>Tipo</label>
-              <select id="svTipo">
-                <option>Spot</option>
-                <option>Anual</option>
-              </select>
-            </div>
+function hojeISO(){
+  const d = new Date();
 
-            <div class="form-group">
-              <label>Quantidade</label>
-              <input id="svQuantidade" placeholder="${categoria === "Saving" ? "Qtd negociada ou média mensal" : "Qtd média mensal"}">
-            </div>
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 
-            <div class="form-group">
-              <label>Preço atual</label>
-              <input id="svPrecoAtual" placeholder="Ex.: 10,50">
-            </div>
+function gerarIdLocal(){
+  if(window.crypto && window.crypto.randomUUID){
+    return window.crypto.randomUUID();
+  }
 
-            ${
-              categoria === "Saving"
-              ? `
-                <div class="form-separator">Competidores</div>
+  return `local-${Date.now()}-${Math.round(Math.random() * 999999)}`;
+}
 
-                <div class="form-group">
-                  <label>Competidor A</label>
-                  <input id="svCompetidorA" placeholder="Fornecedor A">
-                </div>
+function normalizarStatusSaving(status){
+  const raw = String(status || "").trim();
 
-                <div class="form-group">
-                  <label>Preço Competidor A</label>
-                  <input id="svPrecoCompetidorA" placeholder="Ex.: 9,80">
-                </div>
+  const encontrado = STATUS_SAVING.find(x => norm(x) === norm(raw));
+  return encontrado || "Homologação em curso";
+}
 
-                <div class="form-group">
-                  <label>Competidor B</label>
-                  <input id="svCompetidorB" placeholder="Fornecedor B">
-                </div>
+function mapSavingRow(row){
+  const id = getSaving(row, ["id", "uuid", "codigo", "código"]) || gerarIdLocal();
 
-                <div class="form-group">
-                  <label>Preço Competidor B</label>
-                  <input id="svPrecoCompetidorB" placeholder="Ex.: 9,40">
-                </div>
+  const dataRaw = getSaving(row, ["data", "created_at", "data registro", "data da negociação", "data negociacao"]);
+  const dataObj = parseDateSmart(dataRaw) || new Date();
 
-                <div class="form-group">
-                  <label>Competidor C</label>
-                  <input id="svCompetidorC" placeholder="Fornecedor C">
-                </div>
+  const valorAnterior = numberBR(getSaving(row, [
+    "valor anterior",
+    "valor_anterior",
+    "preco anterior",
+    "preço anterior",
+    "valor antigo",
+    "preco antigo",
+    "preço antigo"
+  ]));
 
-                <div class="form-group">
-                  <label>Preço Competidor C</label>
-                  <input id="svPrecoCompetidorC" placeholder="Ex.: 9,60">
-                </div>
-              `
-              : `
-                <div class="form-separator">Reajuste</div>
+  const valorNovo = numberBR(getSaving(row, [
+    "valor novo",
+    "valor_novo",
+    "preco novo",
+    "preço novo",
+    "valor atual",
+    "preco atual",
+    "preço atual"
+  ]));
 
-                <div class="form-group">
-                  <label>% Reajuste solicitado</label>
-                  <input id="svReajusteSolicitado" placeholder="Ex.: 10">
-                </div>
+  const quantidade = numberBR(getSaving(row, [
+    "quantidade",
+    "qtd",
+    "volume",
+    "volume anual",
+    "quantidade anual"
+  ]));
 
-                <div class="form-group">
-                  <label>% Reajuste acordado</label>
-                  <input id="svReajusteAcordado" placeholder="Ex.: 6">
-                </div>
-              `
-            }
+  const status = normalizarStatusSaving(getSaving(row, ["status", "situação", "situacao"]));
 
-            <div class="form-group full">
-              <label>Observação</label>
-              <textarea id="svObservacao" placeholder="Observações da negociação"></textarea>
-            </div>
-          </div>
-        </div>
+  const comprador = getSaving(row, ["comprador", "responsavel", "responsável"]) || "Não informado";
+  const fornecedor = getSaving(row, ["fornecedor", "supplier"]) || "Não informado";
+  const categoria = getSaving(row, ["categoria", "grupo", "familia", "família"]) || "Não informado";
+  const descricao = getSaving(row, ["descricao", "descrição", "item", "produto", "negociacao", "negociação"]) || "Sem descrição";
+  const tipo = getSaving(row, ["tipo", "tipo saving", "classificacao", "classificação"]) || "Saving";
+  const observacao = getSaving(row, ["observacao", "observação", "obs", "comentario", "comentário"]) || "";
 
-        <div class="modal-footer">
-          <button class="action-btn secondary" onclick="fecharModalSaving()">Cancelar</button>
-          <button class="action-btn" onclick="salvarRegistroSaving('${categoria}')">Salvar lançamento</button>
+  const diferencaUnit = valorAnterior - valorNovo;
+  const impacto = diferencaUnit * quantidade;
+
+  const savingCalculado = impacto > 0 ? impacto : 0;
+  const reajusteCalculado = impacto < 0 ? Math.abs(impacto) : 0;
+
+  return {
+    id:String(id),
+    data:dataRaw || hojeISO(),
+    dataObj,
+    anoBase:String(dataObj.getFullYear()),
+    mesBase:dataObj.getMonth() + 1,
+    mesKey:monthKeyFromDate(dataObj),
+
+    comprador,
+    fornecedor,
+    categoria,
+    descricao,
+    tipo,
+    status,
+    observacao,
+
+    valorAnterior,
+    valorNovo,
+    quantidade,
+
+    diferencaUnit,
+    impacto,
+    savingCalculado,
+    reajusteCalculado
+  };
+}
+
+function savingToSupabasePayload(reg){
+  return {
+    data: reg.data || hojeISO(),
+    comprador: reg.comprador || "Não informado",
+    fornecedor: reg.fornecedor || "Não informado",
+    categoria: reg.categoria || "Não informado",
+    descricao: reg.descricao || "Sem descrição",
+    tipo: reg.tipo || "Saving",
+    valor_anterior: Number(reg.valorAnterior || 0),
+    valor_novo: Number(reg.valorNovo || 0),
+    quantidade: Number(reg.quantidade || 0),
+    status: normalizarStatusSaving(reg.status),
+    observacao: reg.observacao || ""
+  };
+}
+
+async function carregarSavingsLocal(force = false){
+  if(savingData.length && !force) return savingData;
+
+  const client = getSupabaseClient();
+
+  if(client){
+    const { data, error } = await client
+      .from("savings")
+      .select("*")
+      .order("created_at", { ascending:false });
+
+    if(!error && Array.isArray(data)){
+      savingData = data.map(mapSavingRow);
+      return savingData;
+    }
+
+    console.warn("Não foi possível carregar savings do Supabase. Tentando CSV local.", error);
+  }
+
+  try{
+    const rows = await loadCSV(FILES.saving, false);
+    savingData = rows.map(mapSavingRow);
+  }catch(error){
+    console.warn("saving.csv não carregado. Ranking Saving iniciará vazio.", error);
+    savingData = [];
+  }
+
+  return savingData;
+}
+
+async function renderSaving(){
+  app.innerHTML = `
+    <section class="hero">
+      <h1>Ranking Saving</h1>
+      <p>Carregando registros de saving...</p>
+    </section>
+  `;
+
+  try{
+    await carregarSavingsLocal(true);
+    renderSavingView(savingData);
+  }catch(error){
+    console.error("Erro Ranking Saving:", error);
+
+    app.innerHTML = `
+      <section class="hero">
+        <h1>Ranking Saving</h1>
+        <p>Erro ao carregar os registros de saving. Veja o Console com F12.</p>
+      </section>
+    `;
+  }
+}
+
+function anosSavingDisponiveis(base){
+  const anos = [...new Set(base.map(x => x.anoBase).filter(Boolean))]
+    .sort((a,b) => Number(b) - Number(a));
+
+  if(!anos.includes(ANO_PADRAO)) anos.unshift(ANO_PADRAO);
+
+  return [...new Set([...anos, OPCAO_TODOS_ANOS])];
+}
+
+function renderSavingView(base){
+  const anos = anosSavingDisponiveis(base);
+  const compradores = uniqueOptions(base, "comprador");
+  const fornecedores = uniqueOptions(base, "fornecedor");
+
+  app.innerHTML = `
+    <section class="hero">
+      <h1>Ranking Saving</h1>
+      <p>
+        Controle de saving, reajuste evitado e homologações, com registros salvos no Supabase.
+      </p>
+    </section>
+
+    ${renderFilterBar([
+      {type:"select", id:"savingAno", label:"Ano", options:anos},
+      {type:"select", id:"savingMesInicial", label:"Mês inicial", options:MESES_FILTRO},
+      {type:"select", id:"savingMesFinal", label:"Mês final", options:MESES_FILTRO},
+      {type:"select", id:"savingCompradorFiltro", label:"Todos compradores", options:compradores},
+      {type:"select", id:"savingFornecedorFiltro", label:"Todos fornecedores", options:fornecedores},
+      {type:"select", id:"savingStatusFiltro", label:"Todos status", options:STATUS_SAVING}
+    ])}
+
+    <div id="savingContent"></div>
+  `;
+
+  aplicarPeriodoPadrao("saving");
+
+  attachFilterEvents(
+    ["savingAno","savingMesInicial","savingMesFinal","savingCompradorFiltro","savingFornecedorFiltro","savingStatusFiltro"],
+    () => renderSavingContent(base)
+  );
+
+  renderSavingContent(base);
+}
+
+function passaFiltroSaving(x){
+  const anoSelecionado = getFilterValue("savingAno") || ANO_PADRAO;
+  const comprador = getFilterValue("savingCompradorFiltro");
+  const fornecedor = getFilterValue("savingFornecedorFiltro");
+  const status = getFilterValue("savingStatusFiltro");
+
+  if(anoSelecionado !== OPCAO_TODOS_ANOS && x.anoBase !== anoSelecionado){
+    return false;
+  }
+
+  const {ini, fim} = getPeriodoMes("saving");
+
+  if(ini !== null && fim !== null){
+    if(!x.dataObj) return false;
+
+    const mes = x.dataObj.getMonth() + 1;
+    if(mes < ini || mes > fim) return false;
+  }
+
+  return (!comprador || x.comprador === comprador) &&
+    (!fornecedor || x.fornecedor === fornecedor) &&
+    (!status || x.status === status);
+}
+
+function filterSavings(base){
+  return base.filter(passaFiltroSaving);
+}
+
+function statusSavingClass(status){
+  const s = norm(status);
+
+  if(s.includes("homologado")) return "badge-green";
+  if(s.includes("declinado")) return "badge-red";
+  if(s.includes("curso")) return "badge-yellow";
+
+  return "badge-blue";
+}
+
+function calcularResumoSaving(data){
+  const ativos = data.filter(x => x.status !== "Declinado");
+  const homologados = data.filter(x => x.status === "Homologado");
+  const curso = data.filter(x => x.status === "Homologação em curso");
+  const declinados = data.filter(x => x.status === "Declinado");
+
+  const savingHomologado = homologados.reduce((s,x) => s + x.savingCalculado, 0);
+  const savingEmCurso = curso.reduce((s,x) => s + x.savingCalculado, 0);
+  const reajusteEvitado = ativos.reduce((s,x) => s + x.reajusteCalculado, 0);
+  const impactoLiquido = ativos.reduce((s,x) => s + x.impacto, 0);
+
+  return {
+    registros:data.length,
+    ativos:ativos.length,
+    homologados:homologados.length,
+    curso:curso.length,
+    declinados:declinados.length,
+    savingHomologado,
+    savingEmCurso,
+    reajusteEvitado,
+    impactoLiquido
+  };
+}
+
+function renderSavingForm(){
+  return `
+    <section class="panel saving-form-panel">
+      <div class="panel-title-row">
+        <div>
+          <h2>Novo registro de saving</h2>
+          <p>Informe o preço anterior, preço novo e volume para o cálculo automático.</p>
         </div>
       </div>
-    </div>
+
+      <form class="saving-form" onsubmit="salvarRegistroSaving(event)">
+        <input id="savingData" type="date" value="${hojeISO()}">
+
+        <input id="savingComprador" placeholder="Comprador / responsável">
+        <input id="savingFornecedor" placeholder="Fornecedor">
+        <input id="savingCategoria" placeholder="Categoria / família">
+        <input id="savingDescricao" placeholder="Descrição da negociação">
+
+        <select id="savingTipo">
+          ${TIPOS_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
+        </select>
+
+        <input id="savingValorAnterior" placeholder="Valor anterior" inputmode="decimal">
+        <input id="savingValorNovo" placeholder="Valor novo" inputmode="decimal">
+        <input id="savingQuantidade" placeholder="Quantidade / volume" inputmode="decimal">
+
+        <select id="savingStatus">
+          ${STATUS_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
+        </select>
+
+        <input id="savingObservacao" placeholder="Observação">
+
+        <button class="btn" type="submit">Salvar registro</button>
+      </form>
+
+      <div class="saving-import-row">
+        <input id="savingImportCSV" type="file" accept=".csv">
+        <button class="btn secondary" type="button" onclick="importarSavingCSV()">Importar CSV</button>
+      </div>
+    </section>
   `;
 }
 
-function fecharModalSaving(event){
-  if(event && event.target && !event.target.classList.contains("modal-overlay")) return;
-  const modal = document.getElementById("savingModal");
-  if(modal) modal.innerHTML = "";
+function renderSavingContent(base){
+  const data = filterSavings(base);
+  const resumo = calcularResumoSaving(data);
+
+  const porComprador = Object.values(group(data.filter(x => x.status !== "Declinado"), "comprador"))
+    .map(g => ({
+      nome:g.nome,
+      valor:g.items.reduce((s,x) => s + x.savingCalculado, 0)
+    }))
+    .sort((a,b) => b.valor - a.valor);
+
+  const porFornecedor = Object.values(group(data.filter(x => x.status !== "Declinado"), "fornecedor"))
+    .map(g => ({
+      nome:g.nome,
+      valor:g.items.reduce((s,x) => s + x.savingCalculado, 0)
+    }))
+    .sort((a,b) => b.valor - a.valor)
+    .slice(0,10);
+
+  const porStatus = STATUS_SAVING.map(status => [
+    status,
+    data.filter(x => x.status === status).length,
+    status === "Homologado" ? "bar-green" : status === "Declinado" ? "bar-red" : "bar-yellow"
+  ]);
+
+  const content = document.getElementById("savingContent");
+  if(!content) return;
+
+  content.innerHTML = `
+    <section class="kpis">
+      ${kpi("Registros filtrados", resumo.registros, "blue")}
+      ${kpi("Saving homologado", money(resumo.savingHomologado), "green")}
+      ${kpi("Saving em curso", money(resumo.savingEmCurso), "yellow")}
+      ${kpi("Reajuste / impacto", money(resumo.reajusteEvitado), "orange")}
+      ${kpi("Impacto líquido", money(resumo.impactoLiquido), resumo.impactoLiquido >= 0 ? "green" : "red")}
+      ${kpi("Homologados", resumo.homologados, "green")}
+      ${kpi("Em homologação", resumo.curso, "yellow")}
+      ${kpi("Declinados", resumo.declinados, "red")}
+    </section>
+
+    ${renderSavingForm()}
+
+    <section class="panel-grid">
+      <div class="panel">
+        <h2>Saving por comprador</h2>
+        ${porComprador.length ? porComprador.map(x => {
+          return barLine(x.nome, x.valor, "bar-green", money(x.valor), porComprador[0]?.valor || 1);
+        }).join("") : `<div class="empty-state">Sem saving ativo para o período.</div>`}
+      </div>
+
+      <div class="panel">
+        <h2>Top fornecedores por saving</h2>
+        ${porFornecedor.length ? porFornecedor.map(x => {
+          return barLine(x.nome, x.valor, "bar-blue", money(x.valor), porFornecedor[0]?.valor || 1);
+        }).join("") : `<div class="empty-state">Sem fornecedores para o período.</div>`}
+      </div>
+
+      <div class="panel">
+        <h2>Status das negociações</h2>
+        ${barList(porStatus, Math.max(...porStatus.map(x => x[1]), 1))}
+      </div>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Comprador</th>
+            <th>Fornecedor</th>
+            <th>Categoria</th>
+            <th>Descrição</th>
+            <th>Tipo</th>
+            <th>Valor anterior</th>
+            <th>Valor novo</th>
+            <th>Qtd</th>
+            <th>Saving</th>
+            <th>Impacto</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${data.map(x => `
+            <tr>
+              <td>${esc(x.data || "—")}</td>
+              <td>${esc(x.comprador || "—")}</td>
+              <td><b>${esc(x.fornecedor || "—")}</b></td>
+              <td>${esc(x.categoria || "—")}</td>
+              <td>
+                ${esc(x.descricao || "—")}
+                ${x.observacao ? `<br><small>${esc(x.observacao)}</small>` : ""}
+              </td>
+              <td>${esc(x.tipo || "—")}</td>
+              <td>${money(x.valorAnterior)}</td>
+              <td>${money(x.valorNovo)}</td>
+              <td>${Number(x.quantidade || 0).toLocaleString("pt-BR", {maximumFractionDigits:2})}</td>
+              <td><b class="green">${money(x.savingCalculado)}</b></td>
+              <td><b class="${x.impacto >= 0 ? "green" : "red"}">${money(x.impacto)}</b></td>
+              <td><span class="badge ${statusSavingClass(x.status)}">${esc(x.status)}</span></td>
+              <td>
+                <div class="table-actions">
+                  <button class="mini-btn" onclick="alterarStatusSaving('${jsArg(x.id)}','Homologado')">Homologar</button>
+                  <button class="mini-btn" onclick="alterarStatusSaving('${jsArg(x.id)}','Homologação em curso')">Curso</button>
+                  <button class="mini-btn danger" onclick="alterarStatusSaving('${jsArg(x.id)}','Declinado')">Declinar</button>
+                  <button class="mini-btn danger" onclick="excluirSaving('${jsArg(x.id)}')">Excluir</button>
+                </div>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+
+      ${!data.length ? `<div class="empty-state">Nenhum registro de saving encontrado para os filtros selecionados.</div>` : ""}
+    </section>
+  `;
 }
 
-async function salvarRegistroSaving(categoria){
-  const client = getSupabaseClient();
+async function salvarRegistroSaving(event){
+  if(event) event.preventDefault();
 
-  if(!client){
-    alert("Supabase não carregou. Verifique o script no index.html.");
+  const reg = {
+    data:getFilterValue("savingData") || hojeISO(),
+    comprador:getFilterValue("savingComprador") || "Não informado",
+    fornecedor:getFilterValue("savingFornecedor") || "Não informado",
+    categoria:getFilterValue("savingCategoria") || "Não informado",
+    descricao:getFilterValue("savingDescricao") || "Sem descrição",
+    tipo:getFilterValue("savingTipo") || "Saving",
+    valorAnterior:numberBR(getFilterValue("savingValorAnterior")),
+    valorNovo:numberBR(getFilterValue("savingValorNovo")),
+    quantidade:numberBR(getFilterValue("savingQuantidade")),
+    status:normalizarStatusSaving(getFilterValue("savingStatus")),
+    observacao:getFilterValue("savingObservacao") || ""
+  };
+
+  if(!reg.valorAnterior || !reg.valorNovo || !reg.quantidade){
+    alert("Informe valor anterior, valor novo e quantidade para calcular o saving.");
     return;
   }
 
-  const registro = {
-    id:uid(),
-    categoria,
-    tipo:document.getElementById("svTipo").value,
-    data:document.getElementById("svData").value,
-    comprador:document.getElementById("svComprador").value,
-    codigo:document.getElementById("svCodigo").value,
-    descricao:document.getElementById("svDescricao").value,
-    fornecedorAtual:document.getElementById("svFornecedorAtual").value,
-    status:document.getElementById("svStatus").value,
-    quantidade:document.getElementById("svQuantidade").value,
-    precoAtual:document.getElementById("svPrecoAtual").value,
-    competidorA:document.getElementById("svCompetidorA")?.value || "",
-    precoCompetidorA:document.getElementById("svPrecoCompetidorA")?.value || "",
-    competidorB:document.getElementById("svCompetidorB")?.value || "",
-    precoCompetidorB:document.getElementById("svPrecoCompetidorB")?.value || "",
-    competidorC:document.getElementById("svCompetidorC")?.value || "",
-    precoCompetidorC:document.getElementById("svPrecoCompetidorC")?.value || "",
-    reajusteSolicitado:document.getElementById("svReajusteSolicitado")?.value || "",
-    reajusteAcordado:document.getElementById("svReajusteAcordado")?.value || "",
-    observacao:document.getElementById("svObservacao").value
-  };
+  const client = getSupabaseClient();
 
-  try{
+  if(client){
     const { error } = await client
-      .from(SAVING_TABLE)
-      .insert([savingToDb(registro)]);
+      .from("savings")
+      .insert([savingToSupabasePayload(reg)]);
 
-    if(error) throw error;
-
-    fecharModalSaving();
-    await renderSaving();
-  }catch(error){
-    console.error("Erro ao salvar saving no Supabase:", error);
-    alert("Erro ao salvar no Supabase. Veja o Console com F12.");
+    if(error){
+      console.error("Erro ao salvar saving:", error);
+      alert("Não consegui salvar no Supabase. Veja o Console com F12.");
+      return;
+    }
+  }else{
+    savingData.unshift(mapSavingRow({
+      id:gerarIdLocal(),
+      data:reg.data,
+      comprador:reg.comprador,
+      fornecedor:reg.fornecedor,
+      categoria:reg.categoria,
+      descricao:reg.descricao,
+      tipo:reg.tipo,
+      valor_anterior:reg.valorAnterior,
+      valor_novo:reg.valorNovo,
+      quantidade:reg.quantidade,
+      status:reg.status,
+      observacao:reg.observacao
+    }));
   }
+
+  await carregarSavingsLocal(true);
+  renderSavingView(savingData);
 }
 
 async function alterarStatusSaving(id, status){
   const client = getSupabaseClient();
 
-  if(!client){
-    alert("Supabase não carregou. Verifique o script no index.html.");
-    return;
-  }
-
-  try{
+  if(client){
     const { error } = await client
-      .from(SAVING_TABLE)
-      .update({ status })
+      .from("savings")
+      .update({ status:normalizarStatusSaving(status) })
       .eq("id", id);
 
-    if(error) throw error;
-
-    const item = savingRegistros.find(x => x.id === id);
-    if(item) item.status = status;
-
-    renderSavingContent(savingsCalculados());
-  }catch(error){
-    console.error("Erro ao alterar status no Supabase:", error);
-    alert("Erro ao alterar status no Supabase. Veja o Console com F12.");
+    if(error){
+      console.error("Erro ao alterar status:", error);
+      alert("Não consegui alterar o status no Supabase. Veja o Console com F12.");
+      return;
+    }
+  }else{
+    const item = savingData.find(x => x.id === id);
+    if(item) item.status = normalizarStatusSaving(status);
   }
+
+  await carregarSavingsLocal(true);
+  renderSavingView(savingData);
 }
 
 async function excluirSaving(id){
+  const ok = confirm("Excluir este registro de saving?");
+  if(!ok) return;
+
   const client = getSupabaseClient();
 
-  if(!client){
-    alert("Supabase não carregou. Verifique o script no index.html.");
-    return;
-  }
-
-  if(!confirm("Deseja excluir este lançamento?")) return;
-
-  try{
+  if(client){
     const { error } = await client
-      .from(SAVING_TABLE)
+      .from("savings")
       .delete()
       .eq("id", id);
 
-    if(error) throw error;
-
-    savingRegistros = savingRegistros.filter(x => x.id !== id);
-    renderSavingContent(savingsCalculados());
-  }catch(error){
-    console.error("Erro ao excluir saving no Supabase:", error);
-    alert("Erro ao excluir no Supabase. Veja o Console com F12.");
+    if(error){
+      console.error("Erro ao excluir saving:", error);
+      alert("Não consegui excluir no Supabase. Veja o Console com F12.");
+      return;
+    }
+  }else{
+    savingData = savingData.filter(x => x.id !== id);
   }
+
+  await carregarSavingsLocal(true);
+  renderSavingView(savingData);
 }
 
-async function importarSavingCSV(event){
-  const client = getSupabaseClient();
+async function importarSavingCSV(){
+  const input = document.getElementById("savingImportCSV");
+  const file = input?.files?.[0];
 
-  if(!client){
-    alert("Supabase não carregou. Verifique o script no index.html.");
+  if(!file){
+    alert("Selecione um arquivo CSV para importar.");
     return;
   }
 
-  const file = event.target.files[0];
+  const text = await file.text();
+  const rows = parseCSV(text);
 
-  if(!file) return;
+  if(rows.length <= 1){
+    alert("CSV vazio ou sem cabeçalho.");
+    return;
+  }
 
-  const reader = new FileReader();
+  const headers = rows[0].map(h => String(h || "").trim().replace(/^\uFEFF/, ""));
 
-  reader.onload = async e => {
-    try{
-      const rows = parseCSV(e.target.result);
+  const objetos = rows.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i] || "");
+    return obj;
+  });
 
-      if(rows.length <= 1){
-        alert("CSV vazio ou sem dados.");
-        return;
-      }
+  const registros = objetos.map(mapSavingRow);
+  const client = getSupabaseClient();
 
-      const headers = rows[0].map(h => String(h || "").trim());
+  if(client){
+    const payload = registros.map(savingToSupabasePayload);
 
-      const novos = rows.slice(1).map(row => {
-        const obj = {};
+    const { error } = await client
+      .from("savings")
+      .insert(payload);
 
-        headers.forEach((h,i) => {
-          obj[h] = row[i] || "";
-        });
-
-        return {
-          id:uid(),
-          categoria:get(obj, ["Categoria"]) || "Saving",
-          tipo:get(obj, ["Tipo"]) || "Spot",
-          data:get(obj, ["Data"]),
-          comprador:get(obj, ["Comprador"]),
-          codigo:get(obj, ["Código", "Codigo"]),
-          descricao:get(obj, ["Descrição", "Descricao"]),
-          fornecedorAtual:get(obj, ["Fornecedor Atual"]),
-          status:get(obj, ["Status"]) || "Homologação em curso",
-          quantidade:get(obj, ["Quantidade"]),
-          precoAtual:get(obj, ["Preço Atual", "Preco Atual"]),
-          competidorA:get(obj, ["Competidor A"]),
-          precoCompetidorA:get(obj, ["Preço Competidor A", "Preco Competidor A"]),
-          competidorB:get(obj, ["Competidor B"]),
-          precoCompetidorB:get(obj, ["Preço Competidor B", "Preco Competidor B"]),
-          competidorC:get(obj, ["Competidor C"]),
-          precoCompetidorC:get(obj, ["Preço Competidor C", "Preco Competidor C"]),
-          reajusteSolicitado:get(obj, ["Reajuste Solicitado %", "Reajuste Solicitado"]),
-          reajusteAcordado:get(obj, ["Reajuste Acordado %", "Reajuste Acordado"]),
-          observacao:get(obj, ["Observação", "Observacao"])
-        };
-      });
-
-      const payload = novos.map(savingToDb);
-
-      const { error } = await client
-        .from(SAVING_TABLE)
-        .insert(payload);
-
-      if(error) throw error;
-
-      await renderSaving();
-    }catch(error){
-      console.error("Erro ao importar CSV para o Supabase:", error);
-      alert("Erro ao importar CSV para o Supabase. Veja o Console com F12.");
-    }finally{
-      event.target.value = "";
+    if(error){
+      console.error("Erro ao importar CSV:", error);
+      alert("Não consegui importar no Supabase. Veja o Console com F12.");
+      return;
     }
-  };
+  }else{
+    savingData = [...registros, ...savingData];
+  }
 
-  reader.readAsText(file, "UTF-8");
-}
-
-function exportarSavingCSV(){
-  const headers = [
-    "Categoria",
-    "Tipo",
-    "Data",
-    "Comprador",
-    "Código",
-    "Descrição",
-    "Fornecedor Atual",
-    "Status",
-    "Quantidade",
-    "Preço Atual",
-    "Competidor A",
-    "Preço Competidor A",
-    "Competidor B",
-    "Preço Competidor B",
-    "Competidor C",
-    "Preço Competidor C",
-    "Reajuste Solicitado %",
-    "Reajuste Acordado %",
-    "Observação"
-  ];
-
-  const linhas = savingRegistros.map(r => [
-    r.categoria,
-    r.tipo,
-    r.data,
-    r.comprador,
-    r.codigo,
-    r.descricao,
-    r.fornecedorAtual,
-    r.status,
-    r.quantidade,
-    r.precoAtual,
-    r.competidorA,
-    r.precoCompetidorA,
-    r.competidorB,
-    r.precoCompetidorB,
-    r.competidorC,
-    r.precoCompetidorC,
-    r.reajusteSolicitado,
-    r.reajusteAcordado,
-    r.observacao
-  ]);
-
-  const csv = [headers, ...linhas]
-    .map(row => row.map(v => `"${String(v || "").replaceAll('"','""')}"`).join(";"))
-    .join("\n");
-
-  const blob = new Blob(["\uFEFF" + csv], {type:"text/csv;charset=utf-8;"});
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "savings-consolidado.csv";
-  a.click();
-
-  URL.revokeObjectURL(url);
+  await carregarSavingsLocal(true);
+  renderSavingView(savingData);
 }
 
 /* =========================
-   NAVEGAÇÃO
+   INICIALIZAÇÃO
 ========================= */
-
-function goPage(page){
-  document.querySelectorAll(".nav-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.page === page);
-  });
-
-  if(page === "geral") renderGeral();
-  if(page === "fornecedores") renderFornecedores();
-  if(page === "saving") renderSaving();
-}
-
-document.querySelectorAll(".nav-btn").forEach(btn => {
-  if(btn.dataset.page){
-    btn.addEventListener("click", () => goPage(btn.dataset.page));
-  }
-});
 
 renderGeral();
