@@ -2500,7 +2500,36 @@ function renderFornecedoresContent(base){
 }
 /* =========================
    RANKING SAVING / SUPABASE
+   Compatível com o CSV original:
+   Categoria; Tipo; Data; Comprador; Código; Descrição; Fornecedor Atual...
 ========================= */
+
+const SAVING_HEADERS_PADRAO = [
+  "Categoria",
+  "Tipo",
+  "Data",
+  "Comprador",
+  "Código",
+  "Descrição",
+  "Fornecedor Atual",
+  "Status",
+  "Quantidade",
+  "Preço Atual",
+  "Competidor A",
+  "Preço Competidor A",
+  "Competidor B",
+  "Preço Competidor B",
+  "Competidor C",
+  "Preço Competidor C",
+  "Reajuste Solicitado %",
+  "Reajuste Acordado %",
+  "Observação"
+];
+
+const TIPOS_FLUXO_SAVING = [
+  "Spot",
+  "Anual"
+];
 
 function getSaving(row, names){
   return get(row, names);
@@ -2508,6 +2537,22 @@ function getSaving(row, names){
 
 function getSavingLike(row, names){
   return getLike(row, names);
+}
+
+function excelSerialToDate(serial){
+  const n = Number(serial);
+
+  if(!Number.isFinite(n) || n < 25000 || n > 90000){
+    return null;
+  }
+
+  const date = new Date(Date.UTC(1899, 11, 30));
+  date.setUTCDate(date.getUTCDate() + n);
+
+  const local = new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  local.setHours(0,0,0,0);
+
+  return local;
 }
 
 function parseDateSmart(text){
@@ -2522,13 +2567,27 @@ function parseDateSmart(text){
     return date;
   }
 
+  if(/^\d+(\,\d+|\.\d+)?$/.test(raw)){
+    const excel = excelSerialToDate(raw.replace(",", "."));
+    if(excel) return excel;
+  }
+
   return parseDateBR(raw);
 }
 
-function hojeISO(){
-  const d = new Date();
+function dateToISO(date){
+  if(!date) return "";
 
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+
+function normalizarDataSaving(valor){
+  const data = parseDateSmart(valor);
+  return data ? dateToISO(data) : hojeISO();
+}
+
+function hojeISO(){
+  return dateToISO(new Date());
 }
 
 function gerarIdLocal(){
@@ -2537,6 +2596,24 @@ function gerarIdLocal(){
   }
 
   return `local-${Date.now()}-${Math.round(Math.random() * 999999)}`;
+}
+
+function normalizarCategoriaSaving(categoria){
+  const raw = String(categoria || "").trim();
+  const c = norm(raw);
+
+  if(c.includes("reajuste")) return "Reajuste";
+  return "Saving";
+}
+
+function normalizarTipoFluxoSaving(tipo){
+  const raw = String(tipo || "").trim();
+  const t = norm(raw);
+
+  if(t.includes("spot")) return "Spot";
+  if(t.includes("anual")) return "Anual";
+
+  return raw || "Anual";
 }
 
 function normalizarStatusSaving(status){
@@ -2555,347 +2632,251 @@ function normalizarStatusSaving(status){
   return "Homologação em curso";
 }
 
-function normalizarTipoSaving(tipo){
-  const raw = String(tipo || "").trim();
+function menorCompetidorSaving(row){
+  const competidores = [
+    {
+      nome:getSaving(row, ["Competidor A", "competidor_a", "competidor a"]),
+      preco:numberBR(getSaving(row, ["Preço Competidor A", "Preco Competidor A", "preco_competidor_a", "preço competidor a"]))
+    },
+    {
+      nome:getSaving(row, ["Competidor B", "competidor_b", "competidor b"]),
+      preco:numberBR(getSaving(row, ["Preço Competidor B", "Preco Competidor B", "preco_competidor_b", "preço competidor b"]))
+    },
+    {
+      nome:getSaving(row, ["Competidor C", "competidor_c", "competidor c"]),
+      preco:numberBR(getSaving(row, ["Preço Competidor C", "Preco Competidor C", "preco_competidor_c", "preço competidor c"]))
+    }
+  ].filter(x => x.preco > 0);
 
-  if(!raw) return "Saving";
+  if(!competidores.length){
+    return {
+      nome:"",
+      preco:0
+    };
+  }
 
-  const encontrado = TIPOS_SAVING.find(x => norm(x) === norm(raw));
-  if(encontrado) return encontrado;
+  return competidores.sort((a,b) => a.preco - b.preco)[0];
+}
 
-  const t = norm(raw);
-
-  if(t.includes("reajuste") || t.includes("impacto")) return "Reajuste / Impacto";
-  if(t.includes("avoidance")) return "Cost Avoidance";
-  if(t.includes("homolog")) return "Homologação";
-  if(t.includes("fornecedor")) return "Troca de fornecedor";
-  if(t.includes("negociacao") || t.includes("negociação")) return "Negociação comercial";
-
-  return "Saving";
+function originalSavingFromRow(row){
+  return {
+    "Categoria": normalizarCategoriaSaving(getSaving(row, ["Categoria", "categoria"])),
+    "Tipo": normalizarTipoFluxoSaving(getSaving(row, ["Tipo", "tipo"])),
+    "Data": normalizarDataSaving(getSaving(row, ["Data", "data", "created_at"])),
+    "Comprador": getSaving(row, ["Comprador", "comprador", "responsavel", "responsável"]) || "Não informado",
+    "Código": getSaving(row, ["Código", "Codigo", "codigo", "código"]) || "",
+    "Descrição": getSaving(row, ["Descrição", "Descricao", "descricao", "descrição", "produto", "item"]) || "Sem descrição",
+    "Fornecedor Atual": getSaving(row, ["Fornecedor Atual", "Fornecedor", "fornecedor_atual", "fornecedor atual", "fornecedor"]) || "Não informado",
+    "Status": normalizarStatusSaving(getSaving(row, ["Status", "status", "situacao", "situação"])),
+    "Quantidade": getSaving(row, ["Quantidade", "quantidade", "qtd", "volume"]) || "",
+    "Preço Atual": getSaving(row, ["Preço Atual", "Preco Atual", "preco_atual", "preço atual", "valor atual"]) || "",
+    "Competidor A": getSaving(row, ["Competidor A", "competidor_a", "competidor a"]) || "",
+    "Preço Competidor A": getSaving(row, ["Preço Competidor A", "Preco Competidor A", "preco_competidor_a", "preço competidor a"]) || "",
+    "Competidor B": getSaving(row, ["Competidor B", "competidor_b", "competidor b"]) || "",
+    "Preço Competidor B": getSaving(row, ["Preço Competidor B", "Preco Competidor B", "preco_competidor_b", "preço competidor b"]) || "",
+    "Competidor C": getSaving(row, ["Competidor C", "competidor_c", "competidor c"]) || "",
+    "Preço Competidor C": getSaving(row, ["Preço Competidor C", "Preco Competidor C", "preco_competidor_c", "preço competidor c"]) || "",
+    "Reajuste Solicitado %": getSaving(row, ["Reajuste Solicitado %", "reajuste_solicitado", "reajuste solicitado %"]) || "",
+    "Reajuste Acordado %": getSaving(row, ["Reajuste Acordado %", "reajuste_acordado", "reajuste acordado %"]) || "",
+    "Observação": getSaving(row, ["Observação", "Observacao", "observacao", "observação", "obs"]) || ""
+  };
 }
 
 function mapSavingRow(row){
+  const original = originalSavingFromRow(row);
+
   const id = getSaving(row, [
     "id",
     "uuid",
-    "codigo",
-    "código",
-    "cod",
     "registro"
   ]) || gerarIdLocal();
 
-  const dataRaw = getSaving(row, [
-    "data",
-    "data_registro",
-    "data registro",
-    "data da negociação",
-    "data negociacao",
-    "data negociação",
-    "data_negociacao",
-    "created_at",
-    "criado em",
-    "criado_em"
-  ]);
+  const categoria = original["Categoria"];
+  const tipo = original["Tipo"];
+  const data = original["Data"];
+  const dataObj = parseDateSmart(data) || new Date();
 
-  const dataObj = parseDateSmart(dataRaw) || new Date();
+  const quantidade = numberBR(original["Quantidade"]);
+  const precoAtual = numberBR(original["Preço Atual"]);
 
-  const comprador = getSaving(row, [
-    "comprador",
-    "responsavel",
-    "responsável",
-    "responsavel_comprador",
-    "responsavel comprador",
-    "buyer",
-    "owner",
-    "usuario",
-    "usuário"
-  ]) || getSavingLike(row, ["comprador", "responsavel", "buyer"]) || "Não informado";
+  const melhorCompetidor = menorCompetidorSaving(original);
+  const menorPrecoCompetidor = melhorCompetidor.preco;
 
-  const fornecedor = getSaving(row, [
-    "fornecedor",
-    "supplier",
-    "nome_fornecedor",
-    "nome fornecedor",
-    "descricao fornecedor",
-    "descrição fornecedor",
-    "razao social",
-    "razão social",
-    "parceiro"
-  ]) || getSavingLike(row, ["fornecedor", "supplier", "razao", "parceiro"]) || "Não informado";
+  const reajusteSolicitadoPct = numberBR(original["Reajuste Solicitado %"]);
+  const reajusteAcordadoPct = numberBR(original["Reajuste Acordado %"]);
 
-  const categoria = getSaving(row, [
-    "categoria",
-    "grupo",
-    "familia",
-    "família",
-    "subcategoria",
-    "classe",
-    "linha",
-    "familia_compra",
-    "família compra"
-  ]) || getSavingLike(row, ["categoria", "familia", "grupo", "classe"]) || "Não informado";
+  let savingCalculado = 0;
+  let reajusteEvitado = 0;
+  let reajusteCalculado = 0;
+  let impacto = 0;
 
-  const descricao = getSaving(row, [
-    "descricao",
-    "descrição",
-    "item",
-    "produto",
-    "negociacao",
-    "negociação",
-    "descricao_negociacao",
-    "descrição negociação",
-    "acao",
-    "ação",
-    "titulo",
-    "título",
-    "projeto"
-  ]) || getSavingLike(row, ["descricao", "negociacao", "produto", "item", "projeto"]) || "Sem descrição";
+  if(categoria === "Saving"){
+    savingCalculado = menorPrecoCompetidor > 0
+      ? Math.max(0, (precoAtual - menorPrecoCompetidor) * quantidade)
+      : 0;
 
-  const tipo = normalizarTipoSaving(getSaving(row, [
-    "tipo",
-    "tipo_saving",
-    "tipo saving",
-    "classificacao",
-    "classificação",
-    "categoria_saving",
-    "tipo registro",
-    "tipo_registro"
-  ]) || getSavingLike(row, ["tipo", "classificacao", "classificação"]));
-
-  const status = normalizarStatusSaving(getSaving(row, [
-    "status",
-    "situacao",
-    "situação",
-    "andamento",
-    "fase"
-  ]) || getSavingLike(row, ["status", "situacao", "fase"]));
-
-  const observacao = getSaving(row, [
-    "observacao",
-    "observação",
-    "obs",
-    "comentario",
-    "comentário",
-    "notes",
-    "nota",
-    "justificativa"
-  ]) || "";
-
-  const valorAnterior = numberBR(getSaving(row, [
-    "valor anterior",
-    "valor_anterior",
-    "preco anterior",
-    "preço anterior",
-    "preco_anterior",
-    "valor antigo",
-    "valor_antigo",
-    "preco antigo",
-    "preço antigo",
-    "valor_base",
-    "valor base",
-    "preco_base",
-    "preço base"
-  ]) || getSavingLike(row, ["valor anterior", "preco anterior", "valor base", "preco base"]));
-
-  const valorNovo = numberBR(getSaving(row, [
-    "valor novo",
-    "valor_novo",
-    "preco novo",
-    "preço novo",
-    "preco_novo",
-    "valor atual",
-    "valor_atual",
-    "preco atual",
-    "preço atual",
-    "valor_negociado",
-    "valor negociado",
-    "preco_negociado",
-    "preço negociado"
-  ]) || getSavingLike(row, ["valor novo", "preco novo", "valor negociado", "preco negociado"]));
-
-  const quantidade = numberBR(getSaving(row, [
-    "quantidade",
-    "qtd",
-    "volume",
-    "volume anual",
-    "quantidade anual",
-    "volume_anual",
-    "qtd_anual",
-    "qtde"
-  ]) || getSavingLike(row, ["quantidade", "volume", "qtd"]));
-
-  const savingDireto = numberBR(getSaving(row, [
-    "saving",
-    "valor_saving",
-    "valor saving",
-    "saving_calculado",
-    "saving calculado",
-    "economia",
-    "ganho",
-    "valor_economia",
-    "valor economia",
-    "economia_total",
-    "economia total"
-  ]) || getSavingLike(row, ["saving", "economia", "ganho"]));
-
-  const reajusteDireto = numberBR(getSaving(row, [
-    "reajuste",
-    "valor_reajuste",
-    "valor reajuste",
-    "reajuste_impacto",
-    "reajuste impacto",
-    "impacto_reajuste",
-    "impacto reajuste"
-  ]) || getSavingLike(row, ["reajuste"]));
-
-  const impactoDireto = numberBR(getSaving(row, [
-    "impacto",
-    "impacto_liquido",
-    "impacto líquido",
-    "valor_impacto",
-    "valor impacto",
-    "impacto_total",
-    "impacto total"
-  ]) || getSavingLike(row, ["impacto"]));
-
-  let diferencaUnit = valorAnterior - valorNovo;
-  let impacto = diferencaUnit * quantidade;
-
-  if(!impacto && savingDireto){
-    impacto = savingDireto;
+    impacto = savingCalculado;
   }
 
-  if(!impacto && impactoDireto){
-    impacto = impactoDireto;
-  }
+  if(categoria === "Reajuste"){
+    const reajusteSolicitadoValor = precoAtual * quantidade * (reajusteSolicitadoPct / 100);
+    const reajusteAcordadoValor = precoAtual * quantidade * (reajusteAcordadoPct / 100);
 
-  if(!impacto && reajusteDireto){
-    impacto = -Math.abs(reajusteDireto);
-  }
+    reajusteEvitado = Math.max(0, reajusteSolicitadoValor - reajusteAcordadoValor);
+    reajusteCalculado = Math.max(0, reajusteAcordadoValor);
 
-  let savingCalculado = impacto > 0 ? impacto : 0;
-  let reajusteCalculado = impacto < 0 ? Math.abs(impacto) : 0;
-
-  if(savingDireto > 0 && tipo !== "Reajuste / Impacto"){
-    savingCalculado = savingDireto;
-  }
-
-  if(reajusteDireto > 0){
-    reajusteCalculado = reajusteDireto;
-  }
-
-  if(impactoDireto > 0 && tipo === "Reajuste / Impacto"){
-    reajusteCalculado = impactoDireto;
+    savingCalculado = reajusteEvitado;
+    impacto = -reajusteCalculado;
   }
 
   return {
     id:String(id),
-    data:dataRaw ? String(dataRaw).slice(0,10) : hojeISO(),
+
+    categoria,
+    tipo,
+    data,
     dataObj,
     anoBase:String(dataObj.getFullYear()),
     mesBase:dataObj.getMonth() + 1,
     mesKey:monthKeyFromDate(dataObj),
 
-    comprador,
-    fornecedor,
-    categoria,
-    descricao,
-    tipo,
-    status,
-    observacao,
+    comprador:original["Comprador"],
+    codigo:original["Código"],
+    descricao:original["Descrição"],
+    fornecedor:original["Fornecedor Atual"],
+    status:original["Status"],
+    observacao:original["Observação"],
 
-    valorAnterior,
-    valorNovo,
     quantidade,
+    precoAtual,
 
-    diferencaUnit,
-    impacto,
-    savingCalculado,
+    competidorA:original["Competidor A"],
+    precoCompetidorA:numberBR(original["Preço Competidor A"]),
+    competidorB:original["Competidor B"],
+    precoCompetidorB:numberBR(original["Preço Competidor B"]),
+    competidorC:original["Competidor C"],
+    precoCompetidorC:numberBR(original["Preço Competidor C"]),
+
+    melhorCompetidor:melhorCompetidor.nome,
+    menorPrecoCompetidor,
+
+    reajusteSolicitadoPct,
+    reajusteAcordadoPct,
+    reajusteEvitado,
     reajusteCalculado,
 
-    _raw:row
+    savingCalculado,
+    impacto,
+
+    _raw:row,
+    _original:original
   };
 }
 
-function colunaSupabase(possiveis){
-  const cleanCols = savingRawColumns.map(c => ({
+function colunaSupabaseSaving(headerPadrao){
+  const variantes = {
+    "Categoria":["Categoria", "categoria"],
+    "Tipo":["Tipo", "tipo"],
+    "Data":["Data", "data"],
+    "Comprador":["Comprador", "comprador"],
+    "Código":["Código", "Codigo", "codigo", "código"],
+    "Descrição":["Descrição", "Descricao", "descricao", "descrição"],
+    "Fornecedor Atual":["Fornecedor Atual", "Fornecedor", "fornecedor_atual", "fornecedor atual", "fornecedor"],
+    "Status":["Status", "status"],
+    "Quantidade":["Quantidade", "quantidade", "qtd"],
+    "Preço Atual":["Preço Atual", "Preco Atual", "preco_atual", "preço atual"],
+    "Competidor A":["Competidor A", "competidor_a", "competidor a"],
+    "Preço Competidor A":["Preço Competidor A", "Preco Competidor A", "preco_competidor_a", "preço competidor a"],
+    "Competidor B":["Competidor B", "competidor_b", "competidor b"],
+    "Preço Competidor B":["Preço Competidor B", "Preco Competidor B", "preco_competidor_b", "preço competidor b"],
+    "Competidor C":["Competidor C", "competidor_c", "competidor c"],
+    "Preço Competidor C":["Preço Competidor C", "Preco Competidor C", "preco_competidor_c", "preço competidor c"],
+    "Reajuste Solicitado %":["Reajuste Solicitado %", "reajuste_solicitado", "reajuste solicitado %"],
+    "Reajuste Acordado %":["Reajuste Acordado %", "reajuste_acordado", "reajuste acordado %"],
+    "Observação":["Observação", "Observacao", "observacao", "observação", "obs"]
+  };
+
+  const cols = savingRawColumns.map(c => ({
     original:c,
     clean:keyClean(c)
   }));
 
-  for(const nome of possiveis){
-    const alvo = keyClean(nome);
-    const found = cleanCols.find(c => c.clean === alvo);
-    if(found) return found.original;
-  }
+  const busca = variantes[headerPadrao] || [headerPadrao];
 
-  for(const nome of possiveis){
+  for(const nome of busca){
     const alvo = keyClean(nome);
-    const found = cleanCols.find(c => c.clean.includes(alvo) || alvo.includes(c.clean));
+    const found = cols.find(c => c.clean === alvo);
     if(found) return found.original;
   }
 
   return "";
 }
 
-function montarPayloadSupabase(reg){
-  const defaults = {
-    data: reg.data || hojeISO(),
-    comprador: reg.comprador || "Não informado",
-    fornecedor: reg.fornecedor || "Não informado",
-    categoria: reg.categoria || "Não informado",
-    descricao: reg.descricao || "Sem descrição",
-    tipo: reg.tipo || "Saving",
-    valor_anterior: Number(reg.valorAnterior || 0),
-    valor_novo: Number(reg.valorNovo || 0),
-    quantidade: Number(reg.quantidade || 0),
-    status: normalizarStatusSaving(reg.status),
-    observacao: reg.observacao || "",
-    saving: Number(reg.savingCalculado || 0),
-    reajuste: Number(reg.reajusteCalculado || 0),
-    impacto: Number(reg.impacto || 0)
-  };
+function valorPayloadSaving(header, value){
+  const h = norm(header);
 
-  if(!savingRawColumns.length){
-    return defaults;
+  if(h === "data"){
+    return normalizarDataSaving(value);
   }
+
+  if(
+    h.includes("quantidade") ||
+    h.includes("preco") ||
+    h.includes("preço") ||
+    h.includes("reajuste")
+  ){
+    return numberBR(value);
+  }
+
+  return value || "";
+}
+
+function montarPayloadSupabaseSaving(rowOuRegistro){
+  const original = rowOuRegistro._original
+    ? rowOuRegistro._original
+    : originalSavingFromRow(rowOuRegistro);
 
   const payload = {};
 
-  const map = [
-    { valor:defaults.data, cols:["data", "data_registro", "data registro", "data da negociação", "data_negociacao", "data negociação"] },
-    { valor:defaults.comprador, cols:["comprador", "responsavel", "responsável", "responsavel_comprador", "buyer", "owner"] },
-    { valor:defaults.fornecedor, cols:["fornecedor", "supplier", "nome_fornecedor", "nome fornecedor", "descricao fornecedor", "descrição fornecedor", "razao social", "razão social"] },
-    { valor:defaults.categoria, cols:["categoria", "grupo", "familia", "família", "subcategoria", "classe"] },
-    { valor:defaults.descricao, cols:["descricao", "descrição", "item", "produto", "negociacao", "negociação", "acao", "ação", "projeto"] },
-    { valor:defaults.tipo, cols:["tipo", "tipo_saving", "tipo saving", "classificacao", "classificação", "tipo_registro"] },
-    { valor:defaults.valor_anterior, cols:["valor_anterior", "valor anterior", "preco anterior", "preço anterior", "preco_anterior", "valor antigo", "valor_base"] },
-    { valor:defaults.valor_novo, cols:["valor_novo", "valor novo", "preco novo", "preço novo", "preco_novo", "valor atual", "valor_negociado"] },
-    { valor:defaults.quantidade, cols:["quantidade", "qtd", "volume", "volume anual", "quantidade anual", "volume_anual"] },
-    { valor:defaults.status, cols:["status", "situacao", "situação", "fase", "andamento"] },
-    { valor:defaults.observacao, cols:["observacao", "observação", "obs", "comentario", "comentário", "justificativa"] },
-    { valor:defaults.saving, cols:["saving", "valor_saving", "valor saving", "saving_calculado", "economia", "valor_economia"] },
-    { valor:defaults.reajuste, cols:["reajuste", "valor_reajuste", "valor reajuste", "reajuste_impacto"] },
-    { valor:defaults.impacto, cols:["impacto", "impacto_liquido", "impacto líquido", "valor_impacto"] }
-  ];
+  if(savingRawColumns.length){
+    SAVING_HEADERS_PADRAO.forEach(header => {
+      const coluna = colunaSupabaseSaving(header);
 
-  map.forEach(item => {
-    const col = colunaSupabase(item.cols);
+      if(!coluna) return;
 
-    if(col){
-      const colClean = keyClean(col);
+      const clean = keyClean(coluna);
 
-      if(!["id", "created at", "created_at", "updated at", "updated_at"].includes(colClean)){
-        payload[col] = item.valor;
+      if(["id", "created at", "created_at", "updated at", "updated_at"].includes(clean)){
+        return;
       }
-    }
-  });
 
-  if(!Object.keys(payload).length){
-    return defaults;
+      payload[coluna] = valorPayloadSaving(header, original[header]);
+    });
+
+    return payload;
   }
 
-  return payload;
+  return {
+    categoria: original["Categoria"],
+    tipo: original["Tipo"],
+    data: normalizarDataSaving(original["Data"]),
+    comprador: original["Comprador"],
+    codigo: original["Código"],
+    descricao: original["Descrição"],
+    fornecedor_atual: original["Fornecedor Atual"],
+    status: original["Status"],
+    quantidade: numberBR(original["Quantidade"]),
+    preco_atual: numberBR(original["Preço Atual"]),
+    competidor_a: original["Competidor A"],
+    preco_competidor_a: numberBR(original["Preço Competidor A"]),
+    competidor_b: original["Competidor B"],
+    preco_competidor_b: numberBR(original["Preço Competidor B"]),
+    competidor_c: original["Competidor C"],
+    preco_competidor_c: numberBR(original["Preço Competidor C"]),
+    reajuste_solicitado: numberBR(original["Reajuste Solicitado %"]),
+    reajuste_acordado: numberBR(original["Reajuste Acordado %"]),
+    observacao: original["Observação"]
+  };
 }
 
 async function carregarSavingsLocal(force = false){
@@ -2987,12 +2968,14 @@ function renderSavingView(base){
   const anos = anosSavingDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
+  const categorias = ["Saving", "Reajuste"];
+  const tipos = ["Spot", "Anual"];
 
   root.innerHTML = `
     <section class="hero">
       <h1>Ranking Saving</h1>
       <p>
-        Controle de savings, reajustes, impactos evitados e homologações com integração ao Supabase.
+        Controle de savings, reajustes e homologações com integração ao Supabase.
       </p>
     </section>
 
@@ -3002,6 +2985,8 @@ function renderSavingView(base){
       {type:"select", id:"savingMesFinal", label:"Mês final", options:MESES_FILTRO},
       {type:"select", id:"savingCompradorFiltro", label:"Todos compradores", options:compradores},
       {type:"select", id:"savingFornecedorFiltro", label:"Todos fornecedores", options:fornecedores},
+      {type:"select", id:"savingCategoriaFiltro", label:"Todas categorias", options:categorias},
+      {type:"select", id:"savingTipoFiltro", label:"Todos tipos", options:tipos},
       {type:"select", id:"savingStatusFiltro", label:"Todos status", options:STATUS_SAVING}
     ])}
 
@@ -3012,7 +2997,16 @@ function renderSavingView(base){
   aplicarPeriodoPadrao("saving");
 
   attachFilterEvents(
-    ["savingAno","savingMesInicial","savingMesFinal","savingCompradorFiltro","savingFornecedorFiltro","savingStatusFiltro"],
+    [
+      "savingAno",
+      "savingMesInicial",
+      "savingMesFinal",
+      "savingCompradorFiltro",
+      "savingFornecedorFiltro",
+      "savingCategoriaFiltro",
+      "savingTipoFiltro",
+      "savingStatusFiltro"
+    ],
     () => renderSavingContent(base)
   );
 
@@ -3023,6 +3017,8 @@ function passaFiltroSaving(x){
   const anoSelecionado = getFilterValue("savingAno") || ANO_PADRAO;
   const comprador = getFilterValue("savingCompradorFiltro");
   const fornecedor = getFilterValue("savingFornecedorFiltro");
+  const categoria = getFilterValue("savingCategoriaFiltro");
+  const tipo = getFilterValue("savingTipoFiltro");
   const status = getFilterValue("savingStatusFiltro");
 
   if(anoSelecionado !== OPCAO_TODOS_ANOS && x.anoBase !== anoSelecionado){
@@ -3040,6 +3036,8 @@ function passaFiltroSaving(x){
 
   return (!comprador || x.comprador === comprador) &&
     (!fornecedor || x.fornecedor === fornecedor) &&
+    (!categoria || x.categoria === categoria) &&
+    (!tipo || x.tipo === tipo) &&
     (!status || x.status === status);
 }
 
@@ -3080,19 +3078,19 @@ function calcularResumoSaving(data){
   };
 }
 
-function abrirModalSaving(tipoInicial = "Saving"){
+function abrirModalSaving(categoriaInicial = "Saving"){
   const root = document.getElementById("modalRoot");
   if(!root) return;
 
-  const tipoNormalizado = normalizarTipoSaving(tipoInicial);
+  const categoriaNormalizada = normalizarCategoriaSaving(categoriaInicial);
 
   root.innerHTML = `
     <div class="modal-overlay">
       <div class="modal-container">
         <div class="modal-header">
           <div>
-            <h2>${tipoNormalizado === "Reajuste / Impacto" ? "Novo reajuste / impacto" : "Novo saving"}</h2>
-            <p>Informe os dados da negociação. O painel calcula o impacto automaticamente.</p>
+            <h2>${categoriaNormalizada === "Reajuste" ? "Novo reajuste" : "Novo saving"}</h2>
+            <p>Preencha no mesmo padrão da planilha original do painel.</p>
           </div>
           <button class="modal-close" onclick="fecharModalSaving()">×</button>
         </div>
@@ -3101,30 +3099,38 @@ function abrirModalSaving(tipoInicial = "Saving"){
           <div class="modal-body">
             <div class="form-grid">
               <div class="form-group">
+                <label>Categoria</label>
+                <select id="savingCategoria">
+                  <option value="Saving" ${categoriaNormalizada === "Saving" ? "selected" : ""}>Saving</option>
+                  <option value="Reajuste" ${categoriaNormalizada === "Reajuste" ? "selected" : ""}>Reajuste</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>Tipo</label>
+                <select id="savingTipo">
+                  ${TIPOS_FLUXO_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div class="form-group">
                 <label>Data</label>
                 <input id="savingData" type="date" value="${hojeISO()}">
               </div>
 
               <div class="form-group">
                 <label>Comprador</label>
-                <input id="savingComprador" placeholder="Responsável">
+                <input id="savingComprador" placeholder="Comprador">
               </div>
 
               <div class="form-group">
-                <label>Fornecedor</label>
-                <input id="savingFornecedor" placeholder="Fornecedor">
+                <label>Código</label>
+                <input id="savingCodigo" placeholder="Código do item">
               </div>
 
               <div class="form-group">
-                <label>Categoria</label>
-                <input id="savingCategoria" placeholder="Família / categoria">
-              </div>
-
-              <div class="form-group">
-                <label>Tipo</label>
-                <select id="savingTipo">
-                  ${TIPOS_SAVING.map(x => `<option value="${esc(x)}" ${x === tipoNormalizado ? "selected" : ""}>${esc(x)}</option>`).join("")}
-                </select>
+                <label>Fornecedor Atual</label>
+                <input id="savingFornecedor" placeholder="Fornecedor atual">
               </div>
 
               <div class="form-group">
@@ -3134,26 +3140,63 @@ function abrirModalSaving(tipoInicial = "Saving"){
                 </select>
               </div>
 
-              <div class="form-separator">Valores da negociação</div>
-
               <div class="form-group">
-                <label>Valor anterior</label>
-                <input id="savingValorAnterior" placeholder="Ex.: 10,50" inputmode="decimal">
-              </div>
-
-              <div class="form-group">
-                <label>Valor novo</label>
-                <input id="savingValorNovo" placeholder="Ex.: 9,80" inputmode="decimal">
-              </div>
-
-              <div class="form-group">
-                <label>Quantidade / volume</label>
+                <label>Quantidade</label>
                 <input id="savingQuantidade" placeholder="Ex.: 1000" inputmode="decimal">
+              </div>
+
+              <div class="form-group">
+                <label>Preço Atual</label>
+                <input id="savingPrecoAtual" placeholder="Ex.: 10,50" inputmode="decimal">
+              </div>
+
+              <div class="form-separator">Concorrentes / Saving</div>
+
+              <div class="form-group">
+                <label>Competidor A</label>
+                <input id="savingCompetidorA" placeholder="Nome">
+              </div>
+
+              <div class="form-group">
+                <label>Preço Competidor A</label>
+                <input id="savingPrecoCompetidorA" placeholder="Ex.: 9,80" inputmode="decimal">
+              </div>
+
+              <div class="form-group">
+                <label>Competidor B</label>
+                <input id="savingCompetidorB" placeholder="Nome">
+              </div>
+
+              <div class="form-group">
+                <label>Preço Competidor B</label>
+                <input id="savingPrecoCompetidorB" placeholder="Ex.: 9,60" inputmode="decimal">
+              </div>
+
+              <div class="form-group">
+                <label>Competidor C</label>
+                <input id="savingCompetidorC" placeholder="Nome">
+              </div>
+
+              <div class="form-group">
+                <label>Preço Competidor C</label>
+                <input id="savingPrecoCompetidorC" placeholder="Ex.: 9,40" inputmode="decimal">
+              </div>
+
+              <div class="form-separator">Reajuste</div>
+
+              <div class="form-group">
+                <label>Reajuste Solicitado %</label>
+                <input id="savingReajusteSolicitado" placeholder="Ex.: 12,5" inputmode="decimal">
+              </div>
+
+              <div class="form-group">
+                <label>Reajuste Acordado %</label>
+                <input id="savingReajusteAcordado" placeholder="Ex.: 8,0" inputmode="decimal">
               </div>
 
               <div class="form-group full">
                 <label>Descrição</label>
-                <input id="savingDescricao" placeholder="Descrição da negociação">
+                <input id="savingDescricao" placeholder="Descrição do item ou negociação">
               </div>
 
               <div class="form-group full">
@@ -3222,7 +3265,7 @@ function renderSavingContent(base){
 
     <section class="saving-actions">
       <button class="action-btn" onclick="abrirModalSaving('Saving')">+ Novo saving</button>
-      <button class="action-btn secondary" onclick="abrirModalSaving('Reajuste / Impacto')">+ Reajuste / impacto</button>
+      <button class="action-btn secondary" onclick="abrirModalSaving('Reajuste')">+ Reajuste</button>
       <button class="action-btn secondary" onclick="baixarModeloSaving()">Baixar planilha padrão</button>
 
       <label class="action-btn secondary file-btn">
@@ -3256,18 +3299,21 @@ function renderSavingContent(base){
       <table>
         <thead>
           <tr>
+            <th>Categoria</th>
+            <th>Tipo</th>
             <th>Data</th>
             <th>Comprador</th>
-            <th>Fornecedor</th>
-            <th>Categoria</th>
+            <th>Código</th>
             <th>Descrição</th>
-            <th>Tipo</th>
-            <th>Valor anterior</th>
-            <th>Valor novo</th>
+            <th>Fornecedor Atual</th>
             <th>Qtd</th>
+            <th>Preço Atual</th>
+            <th>Melhor Competidor</th>
+            <th>Melhor Preço</th>
             <th>Saving</th>
-            <th>Reajuste / impacto</th>
-            <th>Impacto líquido</th>
+            <th>Reajuste Solicitado</th>
+            <th>Reajuste Acordado</th>
+            <th>Impacto Reajuste</th>
             <th>Status</th>
             <th>Ações</th>
           </tr>
@@ -3276,21 +3322,24 @@ function renderSavingContent(base){
         <tbody>
           ${data.map(x => `
             <tr class="${x.status === "Declinado" ? "declined-row" : ""}">
+              <td><span class="badge ${x.categoria === "Saving" ? "badge-green" : "badge-orange"}">${esc(x.categoria)}</span></td>
+              <td>${esc(x.tipo || "—")}</td>
               <td>${esc(x.data || "—")}</td>
               <td>${esc(x.comprador || "—")}</td>
-              <td><b>${esc(x.fornecedor || "—")}</b></td>
-              <td>${esc(x.categoria || "—")}</td>
+              <td>${esc(x.codigo || "—")}</td>
               <td>
                 ${esc(x.descricao || "—")}
                 ${x.observacao ? `<br><small>${esc(x.observacao)}</small>` : ""}
               </td>
-              <td>${esc(x.tipo || "—")}</td>
-              <td>${money(x.valorAnterior)}</td>
-              <td>${money(x.valorNovo)}</td>
+              <td><b>${esc(x.fornecedor || "—")}</b></td>
               <td>${Number(x.quantidade || 0).toLocaleString("pt-BR", {maximumFractionDigits:2})}</td>
+              <td>${money(x.precoAtual)}</td>
+              <td>${esc(x.melhorCompetidor || "—")}</td>
+              <td>${x.menorPrecoCompetidor ? money(x.menorPrecoCompetidor) : "—"}</td>
               <td><b class="green">${money(x.savingCalculado)}</b></td>
+              <td>${x.reajusteSolicitadoPct ? `${String(x.reajusteSolicitadoPct).replace(".", ",")}%` : "—"}</td>
+              <td>${x.reajusteAcordadoPct ? `${String(x.reajusteAcordadoPct).replace(".", ",")}%` : "—"}</td>
               <td><b class="orange">${money(x.reajusteCalculado)}</b></td>
-              <td><b class="${x.impacto >= 0 ? "green" : "red"}">${money(x.impacto)}</b></td>
               <td>
                 <select class="status-select" onchange="alterarStatusSaving('${jsArg(x.id)}', this.value)">
                   ${STATUS_SAVING.map(status => `
@@ -3312,31 +3361,29 @@ function renderSavingContent(base){
 }
 
 function montarRegistroSavingDaTela(){
-  const valorAnterior = numberBR(getFilterValue("savingValorAnterior"));
-  const valorNovo = numberBR(getFilterValue("savingValorNovo"));
-  const quantidade = numberBR(getFilterValue("savingQuantidade"));
-  const tipo = normalizarTipoSaving(getFilterValue("savingTipo"));
-
-  const diferencaUnit = valorAnterior - valorNovo;
-  const impacto = diferencaUnit * quantidade;
-
-  return {
-    data:getFilterValue("savingData") || hojeISO(),
-    comprador:getFilterValue("savingComprador") || "Não informado",
-    fornecedor:getFilterValue("savingFornecedor") || "Não informado",
-    categoria:getFilterValue("savingCategoria") || "Não informado",
-    descricao:getFilterValue("savingDescricao") || "Sem descrição",
-    tipo,
-    valorAnterior,
-    valorNovo,
-    quantidade,
-    status:normalizarStatusSaving(getFilterValue("savingStatus")),
-    observacao:getFilterValue("savingObservacao") || "",
-    diferencaUnit,
-    impacto,
-    savingCalculado: impacto > 0 ? impacto : 0,
-    reajusteCalculado: impacto < 0 ? Math.abs(impacto) : 0
+  const original = {
+    "Categoria": getFilterValue("savingCategoria") || "Saving",
+    "Tipo": getFilterValue("savingTipo") || "Anual",
+    "Data": getFilterValue("savingData") || hojeISO(),
+    "Comprador": getFilterValue("savingComprador") || "Não informado",
+    "Código": getFilterValue("savingCodigo") || "",
+    "Descrição": getFilterValue("savingDescricao") || "Sem descrição",
+    "Fornecedor Atual": getFilterValue("savingFornecedor") || "Não informado",
+    "Status": getFilterValue("savingStatus") || "Homologação em curso",
+    "Quantidade": getFilterValue("savingQuantidade") || "",
+    "Preço Atual": getFilterValue("savingPrecoAtual") || "",
+    "Competidor A": getFilterValue("savingCompetidorA") || "",
+    "Preço Competidor A": getFilterValue("savingPrecoCompetidorA") || "",
+    "Competidor B": getFilterValue("savingCompetidorB") || "",
+    "Preço Competidor B": getFilterValue("savingPrecoCompetidorB") || "",
+    "Competidor C": getFilterValue("savingCompetidorC") || "",
+    "Preço Competidor C": getFilterValue("savingPrecoCompetidorC") || "",
+    "Reajuste Solicitado %": getFilterValue("savingReajusteSolicitado") || "",
+    "Reajuste Acordado %": getFilterValue("savingReajusteAcordado") || "",
+    "Observação": getFilterValue("savingObservacao") || ""
   };
+
+  return mapSavingRow(original);
 }
 
 async function salvarRegistroSaving(event){
@@ -3344,43 +3391,40 @@ async function salvarRegistroSaving(event){
 
   const reg = montarRegistroSavingDaTela();
 
-  if(!reg.valorAnterior || !reg.valorNovo || !reg.quantidade){
-    alert("Informe valor anterior, valor novo e quantidade para calcular o saving/reajuste.");
+  if(!reg.quantidade || !reg.precoAtual){
+    alert("Informe pelo menos Quantidade e Preço Atual.");
+    return;
+  }
+
+  if(reg.categoria === "Saving" && !reg.menorPrecoCompetidor){
+    alert("Para Saving, informe pelo menos um preço de competidor.");
+    return;
+  }
+
+  if(reg.categoria === "Reajuste" && !reg.reajusteAcordadoPct && !reg.reajusteSolicitadoPct){
+    alert("Para Reajuste, informe o percentual solicitado e/ou acordado.");
     return;
   }
 
   const client = getSupabaseClient();
 
   if(client){
-    const payload = montarPayloadSupabase(reg);
+    const payload = montarPayloadSupabaseSaving(reg);
+
+    console.log("Payload Saving enviado ao Supabase:", payload);
+    console.log("Colunas detectadas no Supabase:", savingRawColumns);
 
     const { error } = await client
       .from("savings")
       .insert([payload]);
 
     if(error){
-      console.error("Erro ao salvar saving no Supabase:", error, payload);
-      alert("Não consegui salvar no Supabase. Veja o Console com F12.");
+      console.error("Erro ao salvar saving no Supabase:", error, payload, savingRawColumns);
+      alert(`Não consegui salvar no Supabase: ${error.message || "erro sem mensagem"}`);
       return;
     }
   }else{
-    savingData.unshift(mapSavingRow({
-      id:gerarIdLocal(),
-      data:reg.data,
-      comprador:reg.comprador,
-      fornecedor:reg.fornecedor,
-      categoria:reg.categoria,
-      descricao:reg.descricao,
-      tipo:reg.tipo,
-      valor_anterior:reg.valorAnterior,
-      valor_novo:reg.valorNovo,
-      quantidade:reg.quantidade,
-      status:reg.status,
-      observacao:reg.observacao,
-      saving:reg.savingCalculado,
-      reajuste:reg.reajusteCalculado,
-      impacto:reg.impacto
-    }));
+    savingData.unshift(reg);
   }
 
   fecharModalSaving();
@@ -3392,7 +3436,7 @@ async function alterarStatusSaving(id, status){
   const client = getSupabaseClient();
 
   if(client){
-    const colStatus = colunaSupabase(["status", "situacao", "situação", "fase", "andamento"]) || "status";
+    const colStatus = colunaSupabaseSaving("Status") || "status";
 
     const { error } = await client
       .from("savings")
@@ -3401,7 +3445,7 @@ async function alterarStatusSaving(id, status){
 
     if(error){
       console.error("Erro ao alterar status:", error);
-      alert("Não consegui alterar o status no Supabase. Veja o Console com F12.");
+      alert(`Não consegui alterar o status no Supabase: ${error.message || "erro sem mensagem"}`);
       return;
     }
   }else{
@@ -3427,7 +3471,7 @@ async function excluirSaving(id){
 
     if(error){
       console.error("Erro ao excluir saving:", error);
-      alert("Não consegui excluir no Supabase. Veja o Console com F12.");
+      alert(`Não consegui excluir no Supabase: ${error.message || "erro sem mensagem"}`);
       return;
     }
   }else{
@@ -3440,44 +3484,48 @@ async function excluirSaving(id){
 
 function baixarModeloSaving(){
   const linhas = [
+    SAVING_HEADERS_PADRAO,
     [
-      "Data",
-      "Comprador",
-      "Fornecedor",
-      "Categoria",
-      "Descricao",
-      "Tipo",
-      "Valor anterior",
-      "Valor novo",
-      "Quantidade",
-      "Status",
-      "Observacao"
-    ],
-    [
+      "Saving",
+      "Spot",
       hojeISO(),
       "Gibson",
-      "Fornecedor Exemplo",
-      "Aço",
-      "Negociação item exemplo",
-      "Saving",
-      "10,50",
-      "9,80",
-      "1000",
+      "224380",
+      "Pneu 235/75R17.5 18PR TL 143/141L BF188",
+      "Michelin",
       "Homologado",
-      "Exemplo de saving por redução de preço"
+      "140",
+      "2139,75",
+      "Link",
+      "715,00",
+      "RS Pneus",
+      "626,68",
+      "",
+      "",
+      "",
+      "",
+      "Exemplo de saving por concorrência"
     ],
     [
+      "Reajuste",
+      "Anual",
       hojeISO(),
-      "Gabriel",
-      "Fornecedor Exemplo",
-      "Serviços",
-      "Reajuste contrato exemplo",
-      "Reajuste / Impacto",
-      "100,00",
-      "108,00",
-      "12",
-      "Homologação em curso",
-      "Exemplo de reajuste ou impacto"
+      "Gibson",
+      "202109",
+      "Mancal Varão PT - Sup Central - Nylon",
+      "Plastuning",
+      "Homologado",
+      "586",
+      "1,50",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "28,66666667",
+      "28,66666667",
+      "Exemplo de reajuste"
     ]
   ];
 
@@ -3509,6 +3557,7 @@ async function lerArquivoSaving(file){
     const buffer = await file.arrayBuffer();
     const workbook = window.XLSX.read(buffer, {type:"array"});
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
     return window.XLSX.utils.sheet_to_json(sheet, {defval:""});
   }
 
@@ -3552,15 +3601,18 @@ async function importarSavingCSV(){
   const client = getSupabaseClient();
 
   if(client){
-    const payload = registros.map(montarPayloadSupabase);
+    const payload = registros.map(montarPayloadSupabaseSaving);
+
+    console.log("Importando Savings:", payload);
+    console.log("Colunas detectadas no Supabase:", savingRawColumns);
 
     const { error } = await client
       .from("savings")
       .insert(payload);
 
     if(error){
-      console.error("Erro ao importar planilha no Supabase:", error, payload);
-      alert("Não consegui importar no Supabase. Veja o Console com F12.");
+      console.error("Erro ao importar planilha no Supabase:", error, payload, savingRawColumns);
+      alert(`Não consegui importar no Supabase: ${error.message || "erro sem mensagem"}`);
       return;
     }
   }else{
