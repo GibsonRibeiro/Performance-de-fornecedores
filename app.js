@@ -23,7 +23,7 @@ function getSupabaseClient(){
     return supabaseClient;
   }
 
-  console.error("Supabase não carregou. Verifique se o script do Supabase está antes do app.js no index.html.");
+  console.warn("Supabase não carregado. Verifique se o script do Supabase está antes do app.js no index.html.");
   return null;
 }
 
@@ -60,57 +60,15 @@ const OPCOES_INFLACAO = [
 ];
 
 const CONDICOES_PAGAMENTO = {
-  "6": 28,
-  "2": 7,
-  "91": 49,
-  "14": 45,
-  "45": 52.5,
-  "136": 59,
-  "12": 42,
-  "9": 35,
-  "19": 45,
-  "31": 28,
-  "105": 30,
-  "26": 42,
-  "23": 60,
-  "17": 37.5,
-  "28": 56,
-  "10": 45,
-  "39": 60,
-  "29": 75,
-  "8": 45,
-  "7": 30,
-  "20": 35,
-  "30": 42,
-  "11": 35,
-  "3": 10,
-  "84": 42,
-  "4": 14,
-  "5": 21,
-  "153": 50,
-  "106": 35,
-  "52": 0,
-  "32": 31.5,
-  "82": 15,
-  "53": 0,
-  "24": 0,
-  "67": 5,
-  "56": 17.5,
-  "85": 31.5,
-  "99": 22.5,
-  "122": 105,
-  "47": 0,
-  "152": 48,
-  "151": 60,
-  "150": 15,
-  "88": 90,
-  "137": 38.5,
-  "155": 37.5,
-  "16": 70,
-  "21": 28,
-  "156": 75,
-  "154": 64,
-  "149": 21
+  "6": 28, "2": 7, "91": 49, "14": 45, "45": 52.5, "136": 59,
+  "12": 42, "9": 35, "19": 45, "31": 28, "105": 30, "26": 42,
+  "23": 60, "17": 37.5, "28": 56, "10": 45, "39": 60, "29": 75,
+  "8": 45, "7": 30, "20": 35, "30": 42, "11": 35, "3": 10,
+  "84": 42, "4": 14, "5": 21, "153": 50, "106": 35, "52": 0,
+  "32": 31.5, "82": 15, "53": 0, "24": 0, "67": 5, "56": 17.5,
+  "85": 31.5, "99": 22.5, "122": 105, "47": 0, "152": 48,
+  "151": 60, "150": 15, "88": 90, "137": 38.5, "155": 37.5,
+  "16": 70, "21": 28, "156": 75, "154": 64, "149": 21
 };
 
 const FORNECEDORES_ESTRATEGICOS_FIXOS = [
@@ -168,6 +126,7 @@ function money(value){
 
 function moneyKg(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+
   return `${money(value)}/kg`;
 }
 
@@ -189,6 +148,7 @@ function parsePercent(text){
   const number = Number(value.replace(",","."));
   return Number.isFinite(number) ? number : null;
 }
+
 function parseDateBR(text){
   const raw = String(text || "").trim();
   if(!raw) return null;
@@ -279,7 +239,6 @@ function mesNumeroFromValue(valor){
 
   return Number.isFinite(n) && n >= 1 && n <= 12 ? n : null;
 }
-
 function parseCSV(text){
   const firstLine = text.split(/\r?\n/)[0] || "";
   const delimiter = firstLine.includes(";") ? ";" : ",";
@@ -370,8 +329,7 @@ function uniqueOptions(data, key){
 
 function optionList(values, label){
   return `<option value="">${label}</option>` + values.map(v => {
-    const safe = esc(v);
-    return `<option value="${safe}">${esc(v)}</option>`;
+    return `<option value="${esc(v)}">${esc(v)}</option>`;
   }).join("");
 }
 
@@ -423,6 +381,37 @@ function kpi(label, value, color = "blue", action = ""){
     <div class="kpi" ${clickable}>
       <small>${esc(label)}</small>
       <strong class="${color}">${value}</strong>
+    </div>
+  `;
+}
+
+function miniKpi(label, value, color = "blue"){
+  return `
+    <div style="
+      background:#020617;
+      border:1px solid #334155;
+      border-radius:16px;
+      padding:15px;
+      min-height:92px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+    ">
+      <small style="
+        color:#94a3b8;
+        font-weight:800;
+        font-size:10px;
+        letter-spacing:.7px;
+        text-transform:uppercase;
+        margin-bottom:8px;
+      ">${esc(label)}</small>
+      <strong class="${color}" style="
+        display:block;
+        font-size:19px;
+        font-weight:900;
+        line-height:1.12;
+        overflow-wrap:anywhere;
+      ">${value}</strong>
     </div>
   `;
 }
@@ -602,9 +591,9 @@ function opcoesInflacaoHTML(){
   const aluminio = OPCOES_INFLACAO.filter(x => x.familia === "Alumínio");
   const aco = OPCOES_INFLACAO.filter(x => x.familia === "Aço");
 
-  const render = lista => lista.map(opcao => `
-    <option value="${esc(opcao.id)}">${esc(opcao.label)}</option>
-  `).join("");
+  const render = lista => lista.map(opcao => {
+    return `<option value="${esc(opcao.id)}">${esc(opcao.label)}</option>`;
+  }).join("");
 
   return `
     <optgroup label="Alumínio">
@@ -843,21 +832,6 @@ function gerarInflacaoMensal(base, opcaoId){
       ? ((item.precoInterno / anterior.precoInterno) - 1) * 100
       : null;
 
-    const mesmoMesAnoAnterior = grupos.find(x => {
-      const [anoAtual, mesAtual] = item.mes.split("-");
-      const [anoBase, mesBase] = x.mes.split("-");
-
-      return Number(anoBase) === Number(anoAtual) - 1 && mesBase === mesAtual;
-    });
-
-    item.inflacaoAnual = mesmoMesAnoAnterior && mesmoMesAnoAnterior.precoInterno > 0
-      ? ((item.precoInterno / mesmoMesAnoAnterior.precoInterno) - 1) * 100
-      : null;
-
-    item.baseAnual = mesmoMesAnoAnterior || null;
-  });
-
-  grupos.forEach(item => {
     const primeiro = grupos[0];
 
     item.variacaoPeriodo = primeiro && primeiro.precoInterno > 0
@@ -868,6 +842,29 @@ function gerarInflacaoMensal(base, opcaoId){
   });
 
   return grupos;
+}
+
+function enriquecerInflacaoComBaseComparativa(meses, opcaoId, baseComparativa){
+  if(!meses.length) return meses;
+
+  const comparativaMensal = gerarInflacaoMensal(baseComparativa || [], opcaoId);
+
+  meses.forEach(item => {
+    const [anoAtual, mesAtual] = item.mes.split("-");
+
+    const mesmoMesAnoAnterior = comparativaMensal.find(x => {
+      const [anoBase, mesBase] = x.mes.split("-");
+      return Number(anoBase) === Number(anoAtual) - 1 && mesBase === mesAtual;
+    });
+
+    item.inflacaoAnual = mesmoMesAnoAnterior && mesmoMesAnoAnterior.precoInterno > 0
+      ? ((item.precoInterno / mesmoMesAnoAnterior.precoInterno) - 1) * 100
+      : null;
+
+    item.baseAnual = mesmoMesAnoAnterior || null;
+  });
+
+  return meses;
 }
 
 function calcularResumoInflacaoPeriodo(base, opcaoId){
@@ -902,7 +899,6 @@ function calcularResumoInflacaoPeriodo(base, opcaoId){
     : null;
 
   return {
-    modo:"periodo",
     opcao,
     linhas,
     meses,
@@ -916,28 +912,6 @@ function calcularResumoInflacaoPeriodo(base, opcaoId){
     diferencaVsMercado,
     impactoEstimado
   };
-}
-function enriquecerInflacaoComBaseComparativa(meses, opcaoId, baseComparativa){
-  if(!meses.length) return meses;
-
-  const comparativaMensal = gerarInflacaoMensal(baseComparativa || [], opcaoId);
-
-  meses.forEach(item => {
-    const [anoAtual, mesAtual] = item.mes.split("-");
-
-    const mesmoMesAnoAnterior = comparativaMensal.find(x => {
-      const [anoBase, mesBase] = x.mes.split("-");
-      return Number(anoBase) === Number(anoAtual) - 1 && mesBase === mesAtual;
-    });
-
-    item.inflacaoAnual = mesmoMesAnoAnterior && mesmoMesAnoAnterior.precoInterno > 0
-      ? ((item.precoInterno / mesmoMesAnoAnterior.precoInterno) - 1) * 100
-      : null;
-
-    item.baseAnual = mesmoMesAnoAnterior || null;
-  });
-
-  return meses;
 }
 
 function calcularInflacaoAnualPeriodo(baseFiltrada, opcaoId, baseComparativa){
@@ -994,22 +968,6 @@ function calcularInflacaoAnualPeriodo(baseFiltrada, opcaoId, baseComparativa){
   };
 }
 
-function resumoBaseAnualPeriodo(info){
-  if(!info) return "Sem base anual";
-
-  return `${info.anoAtual} vs ${info.anoAnterior}`;
-}
-
-function textoBasePeriodo(resumo){
-  if(!resumo || !resumo.primeiro || !resumo.ultimo) return "Sem base";
-
-  if(resumo.primeiro.mes === resumo.ultimo.mes){
-    return resumo.primeiro.label;
-  }
-
-  return `${resumo.primeiro.label} → ${resumo.ultimo.label}`;
-}
-
 function corPercentual(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "blue";
   if(Number(value) > 0) return "orange";
@@ -1030,22 +988,42 @@ function corImpacto(value){
   if(Number(value) < 0) return "green";
   return "blue";
 }
+function resumoBaseAnualPeriodo(info){
+  if(!info) return "Sem base anual";
+
+  return `${info.anoAtual} vs ${info.anoAnterior}`;
+}
+
+function textoBasePeriodo(resumo){
+  if(!resumo || !resumo.primeiro || !resumo.ultimo) return "Sem base";
+
+  if(resumo.primeiro.mes === resumo.ultimo.mes){
+    return resumo.primeiro.label;
+  }
+
+  return `${resumo.primeiro.label} → ${resumo.ultimo.label}`;
+}
 
 function renderInflacaoCardsPeriodo(resumo, inflacaoAnualPeriodo){
   return `
-    <section class="kpis inflacao-kpis">
-      ${kpi("Modo de análise", "Período consolidado", "blue")}
-      ${kpi("Família analisada", resumo.opcao.label, "blue")}
-      ${kpi("Preço médio Linshalm", moneyKg(resumo.precoMedio), "blue")}
-      ${kpi("Volume analisado", kgText(resumo.quantidadeTotal), "blue")}
-      ${kpi("Valor comprado", money(resumo.valorTotal), "blue")}
-      ${kpi("Inflação anual", inflacaoAnualPeriodo ? percentText(inflacaoAnualPeriodo.valor) : "Sem base anual", corPercentual(inflacaoAnualPeriodo?.valor))}
-      ${kpi("Base anual", resumoBaseAnualPeriodo(inflacaoAnualPeriodo), "blue")}
-      ${kpi("Variação no período", percentText(resumo.variacaoPeriodo), corPercentual(resumo.variacaoPeriodo))}
-      ${kpi("Base do período", textoBasePeriodo(resumo), "blue")}
-      ${kpi("Índice mercado -1", resumo.indicePonderado ? moneyKg(resumo.indicePonderado) : "Não carregado", resumo.indicePonderado ? "orange" : "yellow")}
-      ${kpi("Diferença vs mercado", percentText(resumo.diferencaVsMercado), corMercado(resumo.diferencaVsMercado))}
-      ${kpi("Impacto estimado", resumo.impactoEstimado !== null ? money(resumo.impactoEstimado) : "—", corImpacto(resumo.impactoEstimado))}
+    <section style="
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(175px,1fr));
+      gap:12px;
+      margin:16px 0 18px;
+    ">
+      ${miniKpi("Modo de análise", "Período consolidado", "blue")}
+      ${miniKpi("Família analisada", resumo.opcao.label, "blue")}
+      ${miniKpi("Preço médio Linshalm", moneyKg(resumo.precoMedio), "blue")}
+      ${miniKpi("Volume analisado", kgText(resumo.quantidadeTotal), "blue")}
+      ${miniKpi("Valor comprado", money(resumo.valorTotal), "blue")}
+      ${miniKpi("Inflação anual", inflacaoAnualPeriodo ? percentText(inflacaoAnualPeriodo.valor) : "Sem base anual", corPercentual(inflacaoAnualPeriodo?.valor))}
+      ${miniKpi("Base anual", resumoBaseAnualPeriodo(inflacaoAnualPeriodo), "blue")}
+      ${miniKpi("Variação no período", percentText(resumo.variacaoPeriodo), corPercentual(resumo.variacaoPeriodo))}
+      ${miniKpi("Base do período", textoBasePeriodo(resumo), "blue")}
+      ${miniKpi("Índice mercado -1", resumo.indicePonderado ? moneyKg(resumo.indicePonderado) : "Não carregado", resumo.indicePonderado ? "orange" : "yellow")}
+      ${miniKpi("Diferença vs mercado", percentText(resumo.diferencaVsMercado), corMercado(resumo.diferencaVsMercado))}
+      ${miniKpi("Impacto estimado", resumo.impactoEstimado !== null ? money(resumo.impactoEstimado) : "—", corImpacto(resumo.impactoEstimado))}
     </section>
   `;
 }
@@ -1060,19 +1038,24 @@ function renderInflacaoCardsPonto(ponto){
     : "Sem base";
 
   return `
-    <section class="kpis inflacao-kpis">
-      ${kpi("Modo de análise", "Mês selecionado", "blue")}
-      ${kpi("Ponto analisado", ponto.label, "blue")}
-      ${kpi("Preço médio Linshalm", moneyKg(ponto.precoInterno), "blue")}
-      ${kpi("Volume analisado", kgText(ponto.quantidadeTotal), "blue")}
-      ${kpi("Valor comprado", money(ponto.valorTotal), "blue")}
-      ${kpi("Inflação anual", percentText(ponto.inflacaoAnual), corPercentual(ponto.inflacaoAnual))}
-      ${kpi("Base anual", baseAnualTexto, "blue")}
-      ${kpi("Variação desde início", percentText(ponto.variacaoPeriodo), corPercentual(ponto.variacaoPeriodo))}
-      ${kpi("Base do período", basePeriodoTexto, "blue")}
-      ${kpi("Índice mercado -1", ponto.indiceMercado ? moneyKg(ponto.indiceMercado) : "Não carregado", ponto.indiceMercado ? "orange" : "yellow")}
-      ${kpi("Diferença vs mercado", percentText(ponto.diferencaPercentual), corMercado(ponto.diferencaPercentual))}
-      ${kpi("Impacto estimado", ponto.impactoEstimado !== null ? money(ponto.impactoEstimado) : "—", corImpacto(ponto.impactoEstimado))}
+    <section style="
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(175px,1fr));
+      gap:12px;
+      margin:16px 0 18px;
+    ">
+      ${miniKpi("Modo de análise", "Mês selecionado", "blue")}
+      ${miniKpi("Ponto analisado", ponto.label, "blue")}
+      ${miniKpi("Preço médio Linshalm", moneyKg(ponto.precoInterno), "blue")}
+      ${miniKpi("Volume analisado", kgText(ponto.quantidadeTotal), "blue")}
+      ${miniKpi("Valor comprado", money(ponto.valorTotal), "blue")}
+      ${miniKpi("Inflação anual", percentText(ponto.inflacaoAnual), corPercentual(ponto.inflacaoAnual))}
+      ${miniKpi("Base anual", baseAnualTexto, "blue")}
+      ${miniKpi("Variação desde início", percentText(ponto.variacaoPeriodo), corPercentual(ponto.variacaoPeriodo))}
+      ${miniKpi("Base do período", basePeriodoTexto, "blue")}
+      ${miniKpi("Índice mercado -1", ponto.indiceMercado ? moneyKg(ponto.indiceMercado) : "Não carregado", ponto.indiceMercado ? "orange" : "yellow")}
+      ${miniKpi("Diferença vs mercado", percentText(ponto.diferencaPercentual), corMercado(ponto.diferencaPercentual))}
+      ${miniKpi("Impacto estimado", ponto.impactoEstimado !== null ? money(ponto.impactoEstimado) : "—", corImpacto(ponto.impactoEstimado))}
     </section>
   `;
 }
@@ -1083,8 +1066,8 @@ function renderInflacaoLineChart(rows, selectedMes){
   }
 
   const width = 980;
-  const height = 285;
-  const margin = {top:42, right:30, bottom:50, left:66};
+  const height = 300;
+  const margin = {top:48, right:30, bottom:58, left:68};
   const chartW = width - margin.left - margin.right;
   const chartH = height - margin.top - margin.bottom;
 
@@ -1129,8 +1112,8 @@ function renderInflacaoLineChart(rows, selectedMes){
     const value = max - (i / 3) * denom;
 
     return `
-      <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" class="chart-grid-line" />
-      <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" class="chart-axis-text">${valorPontoKg(value)}</text>
+      <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#1e293b" stroke-width="1" />
+      <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" fill="#94a3b8" font-size="10" font-weight="700">${valorPontoKg(value)}</text>
     `;
   }).join("");
 
@@ -1142,7 +1125,9 @@ function renderInflacaoLineChart(rows, selectedMes){
         x="${xPos(idx)}"
         y="${height - 22}"
         text-anchor="middle"
-        class="chart-axis-text ${selected ? "chart-axis-selected" : ""}"
+        fill="${selected ? "#f8fafc" : "#94a3b8"}"
+        font-size="11"
+        font-weight="${selected ? "900" : "700"}"
       >${esc(x.label)}</text>
     `;
   }).join("");
@@ -1150,14 +1135,17 @@ function renderInflacaoLineChart(rows, selectedMes){
   const labelsValorInterno = rows.map((x, idx) => {
     const y = yPos(x.precoInterno);
     const selected = x.mes === selectedMes;
-    const labelY = y < 54 ? y + 22 : y - 12;
+    const labelY = y < 58 ? y + 23 : y - 12;
 
     return `
       <text
         x="${xPos(idx)}"
         y="${labelY}"
         text-anchor="middle"
-        class="chart-point-label ${selected ? "chart-point-label-selected" : ""}"
+        fill="${selected ? "#f8fafc" : "#e5e7eb"}"
+        font-size="${selected ? "12" : "10.5"}"
+        font-weight="900"
+        style="cursor:pointer;"
         onclick="selecionarPontoInflacao('${x.mes}')"
       >${valorPontoKg(x.precoInterno)}</text>
     `;
@@ -1172,7 +1160,10 @@ function renderInflacaoLineChart(rows, selectedMes){
         cx="${xPos(idx)}"
         cy="${yPos(x.precoInterno)}"
         r="${r}"
-        class="chart-point-interno ${selected ? "chart-point-selected" : ""}"
+        fill="${selected ? "#f8fafc" : "#38bdf8"}"
+        stroke="${selected ? "#38bdf8" : "#020617"}"
+        stroke-width="${selected ? "4" : "2"}"
+        style="cursor:pointer;"
         onclick="selecionarPontoInflacao('${x.mes}')"
       >
         <title>${x.label} • Linshalm: ${moneyKg(x.precoInterno)} • Volume: ${kgText(x.quantidadeTotal)}</title>
@@ -1189,7 +1180,10 @@ function renderInflacaoLineChart(rows, selectedMes){
         cx="${xPos(idx)}"
         cy="${yPos(x.indiceMercado)}"
         r="${selected ? "6" : "4"}"
-        class="chart-point-mercado"
+        fill="#f59e0b"
+        stroke="#020617"
+        stroke-width="2"
+        style="cursor:pointer;"
         onclick="selecionarPontoInflacao('${x.mes}')"
       >
         <title>${x.label} • ${esc(x.nomeIndice)}: ${moneyKg(x.indiceMercado)}</title>
@@ -1198,23 +1192,32 @@ function renderInflacaoLineChart(rows, selectedMes){
   }).join("");
 
   const linhaMercado = pointsMercado
-    ? `<polyline points="${pointsMercado}" fill="none" class="chart-line-mercado" />`
+    ? `<polyline points="${pointsMercado}" fill="none" stroke="#f59e0b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />`
     : "";
 
   const legendaMercado = pointsMercado
-    ? `<span><i class="legend-line mercado"></i>Mercado / LME -1</span>`
-    : `<span class="muted">Índice externo não carregado</span>`;
+    ? `<span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:24px;height:3px;background:#f59e0b;border-radius:999px;display:inline-block;"></i>Mercado / LME -1</span>`
+    : `<span style="color:#94a3b8;">Índice externo não carregado</span>`;
 
   return `
-    <div class="inflacao-chart-wrap">
-      <svg viewBox="0 0 ${width} ${height}" class="inflacao-chart-svg">
-        <rect x="0" y="0" width="${width}" height="${height}" rx="16" class="chart-bg" />
+    <div style="
+      width:100%;
+      overflow-x:auto;
+      background:#020617;
+      border:1px solid #1e293b;
+      border-radius:20px;
+      padding:12px;
+      margin-top:12px;
+    ">
+      <svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:760px;display:block;">
+        <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#020617" />
+
         ${grid}
 
-        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" class="chart-axis-line" />
-        <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" class="chart-axis-line" />
+        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#334155" stroke-width="1" />
+        <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#334155" stroke-width="1" />
 
-        <polyline points="${pointsInterno}" fill="none" class="chart-line-interno" />
+        <polyline points="${pointsInterno}" fill="none" stroke="#38bdf8" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
         ${linhaMercado}
 
         ${pontosInternos}
@@ -1222,14 +1225,22 @@ function renderInflacaoLineChart(rows, selectedMes){
         ${labelsValorInterno}
         ${labelsMes}
 
-        <text x="${margin.left}" y="23" class="chart-title-small">R$/kg</text>
+        <text x="${margin.left}" y="24" fill="#cbd5e1" font-size="12" font-weight="900">R$/kg</text>
       </svg>
     </div>
 
-    <div class="inflacao-legend">
-      <span><i class="legend-line interno"></i>Linshalm R$/kg</span>
+    <div style="
+      display:flex;
+      align-items:center;
+      gap:18px;
+      flex-wrap:wrap;
+      color:#cbd5e1;
+      font-size:12px;
+      margin:10px 0 0;
+    ">
+      <span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:24px;height:3px;background:#38bdf8;border-radius:999px;display:inline-block;"></i>Linshalm R$/kg</span>
       ${legendaMercado}
-      <span class="muted">Clique em um ponto para abrir a visão do mês.</span>
+      <span style="color:#94a3b8;">Clique em um ponto para abrir a visão do mês.</span>
     </div>
   `;
 }
@@ -1251,12 +1262,17 @@ function renderInflacaoContent(base){
 
   if(!data.length){
     container.innerHTML = `
-      <section class="kpis inflacao-kpis">
-        ${kpi("Modo de análise", "Período consolidado", "blue")}
-        ${kpi("Família analisada", opcao.label, "blue")}
-        ${kpi("Preço médio Linshalm", "—", "blue")}
-        ${kpi("Volume analisado", "—", "blue")}
-        ${kpi("Inflação anual", "—", "yellow")}
+      <section style="
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(175px,1fr));
+        gap:12px;
+        margin:16px 0 18px;
+      ">
+        ${miniKpi("Modo de análise", "Período consolidado", "blue")}
+        ${miniKpi("Família analisada", opcao.label, "blue")}
+        ${miniKpi("Preço médio Linshalm", "—", "blue")}
+        ${miniKpi("Volume analisado", "—", "blue")}
+        ${miniKpi("Inflação anual", "—", "yellow")}
       </section>
 
       <div class="empty-state">
@@ -1277,19 +1293,54 @@ function renderInflacaoContent(base){
   const temIndice = data.some(x => x.indiceMercado > 0);
 
   const aviso = temIndice
-    ? `<div class="inflacao-note">Comparativo externo carregado a partir de <b>data/indices.csv</b>. O valor deve estar em R$/kg e já alinhado como mercado -1.</div>`
-    : `<div class="inflacao-note">Sem <b>data/indices.csv</b> carregado. O painel segue normalmente mostrando apenas a inflação interna Linshalm.</div>`;
+    ? `<div style="color:#94a3b8;font-size:12px;margin-top:10px;line-height:1.5;">Comparativo externo carregado a partir de <b>data/indices.csv</b>. O valor deve estar em R$/kg e já alinhado como mercado -1.</div>`
+    : `<div style="color:#94a3b8;font-size:12px;margin-top:10px;line-height:1.5;">Sem <b>data/indices.csv</b> carregado. O painel segue normalmente mostrando apenas a inflação interna Linshalm.</div>`;
 
   const acaoPonto = pontoSelecionado
-    ? `<button class="btn secondary" type="button" onclick="limparPontoInflacao()">Voltar para consolidado do período</button>`
-    : `<button class="btn secondary" type="button" disabled>Visão consolidada do período</button>`;
+    ? `<button type="button" onclick="limparPontoInflacao()" style="
+        background:#111827;
+        color:#e5e7eb;
+        border:1px solid #334155;
+        border-radius:14px;
+        padding:11px 16px;
+        font-weight:800;
+        cursor:pointer;
+        font-size:13px;
+      ">Voltar para consolidado do período</button>`
+    : `<button type="button" disabled style="
+        background:#111827;
+        color:#94a3b8;
+        border:1px solid #334155;
+        border-radius:14px;
+        padding:11px 16px;
+        font-weight:800;
+        cursor:not-allowed;
+        opacity:.55;
+        font-size:13px;
+      ">Visão consolidada do período</button>`;
 
   container.innerHTML = `
-    <div class="inflacao-study-header">
+    <div style="
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+      background:#020617;
+      border:1px solid #1e293b;
+      border-radius:16px;
+      padding:14px 16px;
+      margin:16px 0;
+    ">
       <div>
-        <strong>${pontoSelecionado ? `Estudo do mês: ${esc(pontoSelecionado.label)}` : "Estudo do período consolidado"}</strong>
-        <span>${esc(opcao.label)}</span>
+        <strong style="display:block;font-size:15px;color:#f8fafc;">
+          ${pontoSelecionado ? `Estudo do mês: ${esc(pontoSelecionado.label)}` : "Estudo do período consolidado"}
+        </strong>
+        <span style="display:block;color:#94a3b8;font-size:13px;margin-top:3px;">
+          ${esc(opcao.label)}
+        </span>
       </div>
+
       ${acaoPonto}
     </div>
 
@@ -1691,15 +1742,19 @@ function renderGeralContent(base){
     </section>
 
     <section class="panel" style="margin-bottom:22px;">
-      <div class="panel-title-row">
+      <div style="
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:16px;
+        margin-bottom:16px;
+      ">
         <div>
           <h2>Total recebido por mês</h2>
-          <p>Visão de recebimentos pelo valor total das linhas entregues no período.</p>
+          <p style="color:#94a3b8;line-height:1.5;margin-top:6px;">
+            Visão de recebimentos pelo valor total das linhas entregues no período.
+          </p>
         </div>
-
-        <button class="btn secondary" type="button" onclick="gerarRelatorioAtencao()">
-          Imprimir pedidos em atenção
-        </button>
       </div>
 
       <div class="month-chart">
@@ -1713,19 +1768,47 @@ function renderGeralContent(base){
       </div>
     </section>
 
-    <section class="panel inflacao-panel" style="margin-bottom:22px;">
-      <div class="inflacao-header">
-        <div>
+    <section class="panel" style="margin-bottom:22px;">
+      <div style="
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:18px;
+        flex-wrap:wrap;
+        margin-bottom:16px;
+      ">
+        <div style="flex:1;min-width:280px;">
           <h2>Acompanhamento inflacionário — Aço e Alumínio</h2>
-          <p>
+          <p style="color:#94a3b8;line-height:1.5;margin-top:6px;">
             Preço médio Linshalm em R$/kg, calculado por valor comprado dividido pela quantidade comprada.
             A visão inicial é o consolidado do período; ao clicar em um ponto, os cards mudam para o mês selecionado.
           </p>
         </div>
 
-        <div class="inflacao-controls">
-          <label for="inflacaoFamilia">Família / subfamília</label>
-          <select id="inflacaoFamilia" onchange="alterarOpcaoInflacao()">
+        <div style="
+          min-width:260px;
+          display:flex;
+          flex-direction:column;
+          gap:7px;
+        ">
+          <label for="inflacaoFamilia" style="
+            color:#cbd5e1;
+            font-size:12px;
+            font-weight:800;
+            text-transform:uppercase;
+            letter-spacing:.6px;
+          ">Família / subfamília</label>
+
+          <select id="inflacaoFamilia" onchange="alterarOpcaoInflacao()" style="
+            width:100%;
+            background:#111827;
+            color:#f8fafc;
+            border:1px solid #334155;
+            border-radius:12px;
+            padding:12px 14px;
+            font-size:14px;
+            outline:none;
+          ">
             ${opcoesInflacaoHTML()}
           </select>
         </div>
@@ -1778,7 +1861,7 @@ function renderGeralContent(base){
       </table>
 
       ${data.length > 1500 ? `
-        <div class="table-note">
+        <div style="color:#94a3b8;font-size:12px;padding:12px 14px;">
           Exibindo as primeiras 1.500 linhas do período filtrado para manter o painel leve.
         </div>
       ` : ""}
@@ -1964,33 +2047,56 @@ function renderMatrizKraljic(stats){
     "Não crítico": stats.filter(x => x.categoria === "Não crítico")
   };
 
-  const card = (titulo, lista, cls, descricao) => {
+  function quad(titulo, lista, classe, descricao){
     const valor = lista.reduce((s,x) => s + x.valorTotal, 0);
 
     return `
-      <div class="kraljic-card ${cls}">
-        <div>
-          <h3>${esc(titulo)}</h3>
-          <p>${esc(descricao)}</p>
+      <div class="quad ${classe}">
+        <h2>${esc(titulo)}</h2>
+        <div class="quad-meta">
+          ${esc(descricao)}<br>
+          <b>${lista.length}</b> fornecedor(es) • <b>${money(valor)}</b>
         </div>
 
-        <strong>${lista.length}</strong>
-        <span>${money(valor)}</span>
+        <div class="supplier-grid">
+          ${lista.slice(0,8).map(x => `
+            <div class="supplier">
+              <h3>${esc(x.nome)}</h3>
+              <div class="row">
+                <span>Valor</span>
+                <b>${money(x.valorTotal)}</b>
+              </div>
+              <div class="row">
+                <span>Performance</span>
+                <b>${x.performance}%</b>
+              </div>
+              <div class="row">
+                <span>Pedidos</span>
+                <b>${x.pedidosUnicos}</b>
+              </div>
+            </div>
+          `).join("")}
 
-        <ul>
-          ${lista.slice(0,5).map(x => `<li>${esc(x.nome)}</li>`).join("")}
-          ${lista.length > 5 ? `<li>+ ${lista.length - 5} fornecedor(es)</li>` : ""}
-        </ul>
+          ${lista.length > 8 ? `
+            <div class="supplier">
+              <h3>+ ${lista.length - 8} fornecedor(es)</h3>
+              <div class="row">
+                <span>Use a tabela abaixo</span>
+                <b>Detalhe</b>
+              </div>
+            </div>
+          ` : ""}
+        </div>
       </div>
     `;
-  };
+  }
 
   return `
-    <section class="kraljic-grid">
-      ${card("Estratégico", categorias["Estratégico"], "estrategico", "Fornecedores definidos como estratégicos para a operação.")}
-      ${card("Alavancável", categorias["Alavancável"], "alavancavel", "Boa performance e alto valor comprado. Espaço para negociação.")}
-      ${card("Gargalo", categorias["Gargalo"], "gargalo", "Baixa performance ou maior risco de fornecimento. Exige atenção.")}
-      ${card("Não crítico", categorias["Não crítico"], "nao-critico", "Menor impacto ou baixo volume de pedidos.")}
+    <section class="matrix" style="margin-bottom:22px;">
+      ${quad("Estratégico", categorias["Estratégico"], "estrategico", "Fornecedores definidos como estratégicos para a operação.")}
+      ${quad("Alavancável", categorias["Alavancável"], "alavancavel", "Boa performance e alto valor comprado. Espaço para negociação.")}
+      ${quad("Gargalo", categorias["Gargalo"], "gargalo", "Baixa performance ou maior risco de fornecimento. Exige atenção.")}
+      ${quad("Não crítico", categorias["Não crítico"], "nao-critico", "Menor impacto ou baixo volume de pedidos.")}
     </section>
   `;
 }
@@ -2084,6 +2190,8 @@ function renderFornecedoresContent(base){
           `).join("")}
         </tbody>
       </table>
+
+      ${!stats.length ? `<div class="empty-state">Nenhum fornecedor encontrado para os filtros selecionados.</div>` : ""}
     </section>
   `;
 }
@@ -2221,7 +2329,7 @@ function mapSavingRow(row){
 
   return {
     id:String(id),
-    data:dataRaw || hojeISO(),
+    data:dataRaw ? String(dataRaw).slice(0,10) : hojeISO(),
     dataObj,
     anoBase:String(dataObj.getFullYear()),
     mesBase:dataObj.getMonth() + 1,
@@ -2347,6 +2455,7 @@ function renderSavingView(base){
     ])}
 
     <div id="savingContent"></div>
+    <div id="modalRoot" class="modal-root"></div>
   `;
 
   aplicarPeriodoPadrao("saving");
@@ -2390,7 +2499,7 @@ function filterSavings(base){
 function statusSavingClass(status){
   const s = norm(status);
 
-  if(s.includes("homologado")) return "badge-green";
+  if(s.includes("homologado") && !s.includes("curso")) return "badge-green";
   if(s.includes("declinado")) return "badge-red";
   if(s.includes("curso")) return "badge-yellow";
 
@@ -2421,47 +2530,100 @@ function calcularResumoSaving(data){
   };
 }
 
-function renderSavingForm(){
-  return `
-    <section class="panel saving-form-panel">
-      <div class="panel-title-row">
-        <div>
-          <h2>Novo registro de saving</h2>
-          <p>Informe o preço anterior, preço novo e volume para o cálculo automático.</p>
+function abrirModalSaving(){
+  const root = document.getElementById("modalRoot");
+  if(!root) return;
+
+  root.innerHTML = `
+    <div class="modal-overlay">
+      <div class="modal-container">
+        <div class="modal-header">
+          <div>
+            <h2>Novo registro de saving</h2>
+            <p>Informe preço anterior, preço novo e volume. O cálculo será feito automaticamente.</p>
+          </div>
+          <button class="modal-close" onclick="fecharModalSaving()">×</button>
         </div>
+
+        <form onsubmit="salvarRegistroSaving(event)">
+          <div class="modal-body">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Data</label>
+                <input id="savingData" type="date" value="${hojeISO()}">
+              </div>
+
+              <div class="form-group">
+                <label>Comprador</label>
+                <input id="savingComprador" placeholder="Responsável">
+              </div>
+
+              <div class="form-group">
+                <label>Fornecedor</label>
+                <input id="savingFornecedor" placeholder="Fornecedor">
+              </div>
+
+              <div class="form-group">
+                <label>Categoria</label>
+                <input id="savingCategoria" placeholder="Família / categoria">
+              </div>
+
+              <div class="form-group">
+                <label>Tipo</label>
+                <select id="savingTipo">
+                  ${TIPOS_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>Status</label>
+                <select id="savingStatus">
+                  ${STATUS_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div class="form-separator">Valores da negociação</div>
+
+              <div class="form-group">
+                <label>Valor anterior</label>
+                <input id="savingValorAnterior" placeholder="Ex.: 10,50" inputmode="decimal">
+              </div>
+
+              <div class="form-group">
+                <label>Valor novo</label>
+                <input id="savingValorNovo" placeholder="Ex.: 9,80" inputmode="decimal">
+              </div>
+
+              <div class="form-group">
+                <label>Quantidade / volume</label>
+                <input id="savingQuantidade" placeholder="Ex.: 1000" inputmode="decimal">
+              </div>
+
+              <div class="form-group full">
+                <label>Descrição</label>
+                <input id="savingDescricao" placeholder="Descrição da negociação">
+              </div>
+
+              <div class="form-group full">
+                <label>Observação</label>
+                <textarea id="savingObservacao" placeholder="Observações adicionais"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="action-btn secondary" type="button" onclick="fecharModalSaving()">Cancelar</button>
+            <button class="action-btn" type="submit">Salvar registro</button>
+          </div>
+        </form>
       </div>
-
-      <form class="saving-form" onsubmit="salvarRegistroSaving(event)">
-        <input id="savingData" type="date" value="${hojeISO()}">
-
-        <input id="savingComprador" placeholder="Comprador / responsável">
-        <input id="savingFornecedor" placeholder="Fornecedor">
-        <input id="savingCategoria" placeholder="Categoria / família">
-        <input id="savingDescricao" placeholder="Descrição da negociação">
-
-        <select id="savingTipo">
-          ${TIPOS_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
-        </select>
-
-        <input id="savingValorAnterior" placeholder="Valor anterior" inputmode="decimal">
-        <input id="savingValorNovo" placeholder="Valor novo" inputmode="decimal">
-        <input id="savingQuantidade" placeholder="Quantidade / volume" inputmode="decimal">
-
-        <select id="savingStatus">
-          ${STATUS_SAVING.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("")}
-        </select>
-
-        <input id="savingObservacao" placeholder="Observação">
-
-        <button class="btn" type="submit">Salvar registro</button>
-      </form>
-
-      <div class="saving-import-row">
-        <input id="savingImportCSV" type="file" accept=".csv">
-        <button class="btn secondary" type="button" onclick="importarSavingCSV()">Importar CSV</button>
-      </div>
-    </section>
+    </div>
   `;
+}
+
+function fecharModalSaving(){
+  const root = document.getElementById("modalRoot");
+  if(root) root.innerHTML = "";
 }
 
 function renderSavingContent(base){
@@ -2504,7 +2666,14 @@ function renderSavingContent(base){
       ${kpi("Declinados", resumo.declinados, "red")}
     </section>
 
-    ${renderSavingForm()}
+    <section class="saving-actions">
+      <button class="action-btn" onclick="abrirModalSaving()">+ Novo saving</button>
+
+      <label class="action-btn secondary file-btn">
+        Importar CSV
+        <input id="savingImportCSV" type="file" accept=".csv" onchange="importarSavingCSV()">
+      </label>
+    </section>
 
     <section class="panel-grid">
       <div class="panel">
@@ -2549,7 +2718,7 @@ function renderSavingContent(base){
 
         <tbody>
           ${data.map(x => `
-            <tr>
+            <tr class="${x.status === "Declinado" ? "declined-row" : ""}">
               <td>${esc(x.data || "—")}</td>
               <td>${esc(x.comprador || "—")}</td>
               <td><b>${esc(x.fornecedor || "—")}</b></td>
@@ -2564,14 +2733,15 @@ function renderSavingContent(base){
               <td>${Number(x.quantidade || 0).toLocaleString("pt-BR", {maximumFractionDigits:2})}</td>
               <td><b class="green">${money(x.savingCalculado)}</b></td>
               <td><b class="${x.impacto >= 0 ? "green" : "red"}">${money(x.impacto)}</b></td>
-              <td><span class="badge ${statusSavingClass(x.status)}">${esc(x.status)}</span></td>
               <td>
-                <div class="table-actions">
-                  <button class="mini-btn" onclick="alterarStatusSaving('${jsArg(x.id)}','Homologado')">Homologar</button>
-                  <button class="mini-btn" onclick="alterarStatusSaving('${jsArg(x.id)}','Homologação em curso')">Curso</button>
-                  <button class="mini-btn danger" onclick="alterarStatusSaving('${jsArg(x.id)}','Declinado')">Declinar</button>
-                  <button class="mini-btn danger" onclick="excluirSaving('${jsArg(x.id)}')">Excluir</button>
-                </div>
+                <select class="status-select" onchange="alterarStatusSaving('${jsArg(x.id)}', this.value)">
+                  ${STATUS_SAVING.map(status => `
+                    <option value="${esc(status)}" ${x.status === status ? "selected" : ""}>${esc(status)}</option>
+                  `).join("")}
+                </select>
+              </td>
+              <td>
+                <button class="mini-btn" onclick="excluirSaving('${jsArg(x.id)}')">Excluir</button>
               </td>
             </tr>
           `).join("")}
@@ -2634,6 +2804,7 @@ async function salvarRegistroSaving(event){
     }));
   }
 
+  fecharModalSaving();
   await carregarSavingsLocal(true);
   renderSavingView(savingData);
 }
