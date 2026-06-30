@@ -1,6 +1,7 @@
 const FILES = {
   geral: "./data/geral.csv",
   saving: "./data/saving.csv",
+  indices: "./data/indices.csv",
   historico: {
     "2026": "./data/geral.csv",
     "2025": "./data/2025.csv",
@@ -28,14 +29,27 @@ function getSupabaseClient(){
 const ANO_PADRAO = "2026";
 const ANOS_HISTORICO = ["2026", "2025", "2024", "2023"];
 const OPCAO_TODOS_ANOS = "Todos os anos";
+
 const MESES_FILTRO = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
 ];
 
+const MASCARAS_INFLACAO = [
+  { familia:"Aço", subfamilia:"Chapas Aço Planas", prefixo:"1.01.01" },
+  { familia:"Aço", subfamilia:"Bobina Aço", prefixo:"1.01.02" },
+  { familia:"Aço", subfamilia:"Barras Aço", prefixo:"1.09.03" },
+  { familia:"Aço", subfamilia:"Cantoneiras", prefixo:"1.09.02" },
+  { familia:"Aço", subfamilia:"Tubos Aço", prefixo:"1.09.01.01" },
+  { familia:"Alumínio", subfamilia:"Chapas Alumínio", prefixo:"1.02.01" },
+  { familia:"Alumínio", subfamilia:"Bobina Alumínio", prefixo:"1.02.02" }
+];
+
 let geralData = [];
 let fornecedoresData = [];
 let savingData = [];
+let indicesData = [];
+let indicesTentouCarregar = false;
 
 const app = document.getElementById("app");
 
@@ -220,7 +234,6 @@ function monthLabel(key){
   const nomes = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
   return `${nomes[Number(month) - 1]}/${year}`;
 }
-
 function parseCSV(text){
   const firstLine = text.split(/\r?\n/)[0] || "";
   const delimiter = firstLine.includes(";") ? ";" : ",";
@@ -237,12 +250,12 @@ function parseCSV(text){
     if(char === '"' && inQuotes && next === '"'){
       field += '"';
       i++;
-    } else if(char === '"'){
+    }else if(char === '"'){
       inQuotes = !inQuotes;
-    } else if(char === delimiter && !inQuotes){
+    }else if(char === delimiter && !inQuotes){
       row.push(field);
       field = "";
-    } else if((char === "\n" || char === "\r") && !inQuotes){
+    }else if((char === "\n" || char === "\r") && !inQuotes){
       if(field || row.length){
         row.push(field);
         rows.push(row);
@@ -250,7 +263,7 @@ function parseCSV(text){
         field = "";
       }
       if(char === "\r" && next === "\n") i++;
-    } else {
+    }else{
       field += char;
     }
   }
@@ -511,6 +524,245 @@ function aplicarFiltroPeriodoMes(prefix, mesKey){
   }
 }
 
+function classificarMascaraInflacao(mascara){
+  const valor = String(mascara || "").trim();
+  if(!valor) return null;
+
+  const regras = [...MASCARAS_INFLACAO].sort((a,b) => b.prefixo.length - a.prefixo.length);
+  return regras.find(regra => valor.startsWith(regra.prefixo)) || null;
+}
+
+function mapIndicesRows(rows){
+  return rows.map(r => {
+    const ano = String(get(r, ["Ano", "Year"])).trim();
+    const mesRaw = get(r, ["Mes", "Mês", "Month"]);
+    const mesNumero = Number(String(mesRaw).replace(/\D/g, "")) || mesNumeroFromValue(mesRaw);
+    const mes = mesNumero ? String(mesNumero).padStart(2,"0") : "";
+    const familia = get(r, ["Familia", "Família"]);
+    const indice = get(r, ["Indice", "Índice"]);
+    const valor = numberBR(get(r, ["Valor", "Valor R$/kg", "Valor BRL KG", "Valor_BRL_KG"]));
+
+    return {
+      ano,
+      mes,
+      key: ano && mes ? `${ano}-${mes}` : "",
+      familia,
+      indice,
+      valor
+    };
+  }).filter(x => x.key && x.familia && x.valor > 0);
+}
+
+async function ensureIndicesData(){
+  if(indicesTentouCarregar) return;
+  indicesTentouCarregar = true;
+
+  try{
+    const rows = await loadCSV(FILES.indices, false);
+    indicesData = mapIndicesRows(rows);
+  }catch(error){
+    console.warn("indices.csv não carregado. O painel seguirá apenas com inflação interna.", error);
+    indicesData = [];
+  }
+}
+function buscarIndiceMercado(familia, mesKey){
+  const item = indicesData.find(x => norm(x.familia) === norm(familia) && x.key === mesKey);
+  return item || null;
+}
+
+function gerarInflacaoMensal(base, familia){
+  const linhas = base.filter(x => {
+    return x.familiaInflacao === familia &&
+      x.mesRecebimento &&
+      x.quantidade > 0 &&
+      x.valor > 0;
+  });
+
+  const grupos = Object.values(group(linhas, "mesRecebimento"))
+    .map(g => {
+      const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
+      const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
+      const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
+      const indice = buscarIndiceMercado(familia, g.nome);
+      const valorIndice = indice ? indice.valor : null;
+      const diferencaPercentual = valorIndice && valorIndice > 0 ? ((precoInterno / valorIndice) - 1) * 100 : null;
+      const impactoEstimado = valorIndice ? (precoInterno - valorIndice) * quantidadeTotal : null;
+
+      return {
+        mes:g.nome,
+        label:monthLabel(g.nome),
+        familia,
+        precoInterno,
+        indiceMercado:valorIndice,
+        nomeIndice:indice?.indice || "Mercado -1",
+        diferencaPercentual,
+        impactoEstimado,
+        quantidadeTotal,
+        valorTotal
+      };
+    })
+    .sort((a,b) => a.mes.localeCompare(b.mes));
+
+  grupos.forEach((item, index) => {
+    const anterior = grupos[index - 1];
+    item.inflacaoInterna = anterior && anterior.precoInterno > 0
+      ? ((item.precoInterno / anterior.precoInterno) - 1) * 100
+      : null;
+  });
+
+  return grupos;
+}
+
+function percentText(value){
+  if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  return `${Number(value).toFixed(2).replace(".", ",")}%`;
+}
+
+function kgText(value){
+  return `${Number(value || 0).toLocaleString("pt-BR", {maximumFractionDigits:0})} kg`;
+}
+
+function renderInflacaoLineChart(rows){
+  if(!rows.length){
+    return `<div class="empty-state">Nenhuma compra encontrada para esta família no período filtrado.</div>`;
+  }
+
+  const width = 980;
+  const height = 330;
+  const margin = {top:24, right:32, bottom:54, left:74};
+  const chartW = width - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+
+  const valores = [];
+
+  rows.forEach(x => {
+    if(x.precoInterno > 0) valores.push(x.precoInterno);
+    if(x.indiceMercado > 0) valores.push(x.indiceMercado);
+  });
+
+  if(!valores.length){
+    return `<div class="empty-state">Não há valores suficientes para montar o gráfico.</div>`;
+  }
+
+  const max = Math.max(...valores) * 1.12;
+  const minRaw = Math.min(...valores) * 0.92;
+  const min = Math.max(0, minRaw);
+  const denom = max - min || 1;
+
+  const xPos = index => rows.length === 1
+    ? margin.left + chartW / 2
+    : margin.left + (index / (rows.length - 1)) * chartW;
+
+  const yPos = value => margin.top + chartH - ((value - min) / denom) * chartH;
+
+  const pointsInterno = rows
+    .filter(x => x.precoInterno > 0)
+    .map(x => {
+      const idx = rows.indexOf(x);
+      return `${xPos(idx)},${yPos(x.precoInterno)}`;
+    }).join(" ");
+
+  const pointsMercado = rows
+    .filter(x => x.indiceMercado > 0)
+    .map(x => {
+      const idx = rows.indexOf(x);
+      return `${xPos(idx)},${yPos(x.indiceMercado)}`;
+    }).join(" ");
+
+  const grid = [0,1,2,3,4].map(i => {
+    const y = margin.top + (i / 4) * chartH;
+    const value = max - (i / 4) * denom;
+
+    return `
+      <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#1e293b" stroke-width="1" />
+      <text x="${margin.left - 12}" y="${y + 4}" text-anchor="end" fill="#94a3b8" font-size="11">${money(value)}</text>
+    `;
+  }).join("");
+
+  const labels = rows.map((x, idx) => `
+    <text x="${xPos(idx)}" y="${height - 22}" text-anchor="middle" fill="#94a3b8" font-size="11">${esc(x.label)}</text>
+  `).join("");
+
+  const pontosInternos = rows.map((x, idx) => `
+    <circle cx="${xPos(idx)}" cy="${yPos(x.precoInterno)}" r="4" fill="#38bdf8">
+      <title>${x.label} • Linshalm: ${money(x.precoInterno)}/kg • Volume: ${kgText(x.quantidadeTotal)}</title>
+    </circle>
+  `).join("");
+
+  const pontosMercado = rows.filter(x => x.indiceMercado > 0).map(x => {
+    const idx = rows.indexOf(x);
+
+    return `
+      <circle cx="${xPos(idx)}" cy="${yPos(x.indiceMercado)}" r="4" fill="#f59e0b">
+        <title>${x.label} • ${esc(x.nomeIndice)}: ${money(x.indiceMercado)}/kg</title>
+      </circle>
+    `;
+  }).join("");
+
+  const linhaMercado = pointsMercado
+    ? `<polyline points="${pointsMercado}" fill="none" stroke="#f59e0b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />`
+    : "";
+
+  const legendaMercado = pointsMercado
+    ? `<span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:3px;background:#f59e0b;display:inline-block;border-radius:999px;"></i>Mercado / LME -1</span>`
+    : `<span style="color:#94a3b8;">Índice externo não carregado</span>`;
+
+  return `
+    <div style="width:100%;overflow-x:auto;">
+      <svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:760px;display:block;">
+        <rect x="0" y="0" width="${width}" height="${height}" rx="14" fill="#020617" />
+        ${grid}
+        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#334155" />
+        <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#334155" />
+        <polyline points="${pointsInterno}" fill="none" stroke="#38bdf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        ${linhaMercado}
+        ${pontosInternos}
+        ${pontosMercado}
+        ${labels}
+        <text x="${margin.left}" y="18" fill="#e5e7eb" font-size="12" font-weight="700">R$/kg</text>
+      </svg>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:12px;color:#cbd5e1;font-size:12px;">
+      <span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:3px;background:#38bdf8;display:inline-block;border-radius:999px;"></i>Linshalm R$/kg</span>
+      ${legendaMercado}
+    </div>
+  `;
+}
+
+function renderInflacaoContent(base){
+  const container = document.getElementById("inflacaoContent");
+  if(!container) return;
+
+  const familia = getFilterValue("inflacaoFamilia") || "Alumínio";
+  const data = gerarInflacaoMensal(base, familia);
+  const ultimo = data[data.length - 1];
+  const temIndice = data.some(x => x.indiceMercado > 0);
+
+  const cards = ultimo
+    ? `
+      <section class="kpis" style="margin-top:18px;">
+        ${kpi("Preço médio Linshalm", `${money(ultimo.precoInterno)}/kg`, "blue")}
+        ${kpi("Inflação interna", percentText(ultimo.inflacaoInterna), ultimo.inflacaoInterna >= 0 ? "orange" : "green")}
+        ${kpi("Volume analisado", kgText(ultimo.quantidadeTotal), "blue")}
+        ${kpi("Índice mercado -1", ultimo.indiceMercado ? `${money(ultimo.indiceMercado)}/kg` : "Não carregado", ultimo.indiceMercado ? "orange" : "yellow")}
+        ${kpi("Diferença vs mercado", percentText(ultimo.diferencaPercentual), ultimo.diferencaPercentual > 0 ? "red" : "green")}
+        ${kpi("Impacto estimado", ultimo.impactoEstimado !== null ? money(ultimo.impactoEstimado) : "—", ultimo.impactoEstimado > 0 ? "red" : "green")}
+      </section>
+    `
+    : "";
+
+  const aviso = temIndice
+    ? `<div class="subtle-note">Comparativo externo carregado a partir de <b>data/indices.csv</b>. O valor deve estar em R$/kg e já alinhado como mercado -1.</div>`
+    : `<div class="subtle-note">Sem <b>data/indices.csv</b> carregado. O painel segue normalmente mostrando apenas a inflação interna Linshalm.</div>`;
+
+  container.innerHTML = `
+    ${cards}
+    ${renderInflacaoLineChart(data)}
+    ${aviso}
+  `;
+}
+
 /* =========================
    MOTOR GERAL
 ========================= */
@@ -550,6 +802,9 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
     const condicaoPagamento = String(get(r, ["Condição Pagamento", "Condicao Pagamento"])).trim();
     const prazoPagamento = CONDICOES_PAGAMENTO[condicaoPagamento] ?? 0;
 
+    const mascaraEntrada = get(r, ["Máscara de Entrada", "Mascara de Entrada", "Mascara Entrada"]);
+    const inflacao = classificarMascaraInflacao(mascaraEntrada);
+
     const faixa = calcularFaixa(previsaoInicialObj, dataRecebimentoObj);
     const entregue = !!dataRecebimentoObj;
 
@@ -572,6 +827,9 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       descricaoProduto: get(r, ["Descrição Produto", "Descricao Produto", "Desc Produto"]),
       fornecedor: get(r, ["Descrição Fornecedor", "Fornecedor"]),
       comprador: get(r, ["Nome Comprador", "Comprador"]),
+      mascaraEntrada,
+      familiaInflacao: inflacao?.familia || "",
+      subfamiliaInflacao: inflacao?.subfamilia || "",
       quantidade,
       precoUnitario,
       valor,
@@ -612,7 +870,6 @@ async function ensureGeralData(){
 
   geralData = carregados;
 }
-
 /* =========================
    DASHBOARD GERAL
 ========================= */
@@ -639,8 +896,9 @@ async function renderGeral(){
 
   try{
     await ensureGeralData();
+    await ensureIndicesData();
     renderGeralView(geralData);
-  } catch(error){
+  }catch(error){
     console.error("Erro Dashboard Geral:", error);
 
     app.innerHTML = `
@@ -865,6 +1123,8 @@ async function gerarRelatorioAtencao(){
 
 function renderGeralContent(base){
   const data = filterGeral(base);
+  window.inflacaoBaseAtual = data;
+
   const content = document.getElementById("geralContent");
 
   const countFaixa = name => data.filter(x => norm(x.faixa) === norm(name)).length;
@@ -930,6 +1190,7 @@ function renderGeralContent(base){
     .sort((a,b) => a.mes.localeCompare(b.mes));
 
   const maxMes = Math.max(...recebidosPorMes.map(x => x.valor), 1);
+
   content.innerHTML = `
     <section class="kpis">
       ${kpi("Registros filtrados", data.length, "blue", "limparFiltrosGeral()")}
@@ -979,6 +1240,24 @@ function renderGeralContent(base){
       </div>
     </section>
 
+    <section class="panel" style="margin-bottom:22px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h2>Acompanhamento inflacionário — Aço e Alumínio</h2>
+          <p style="margin:6px 0 0;color:#94a3b8;font-size:13px;">
+            Preço médio real Linshalm em R$/kg com base nas máscaras de entrada. O índice externo é opcional.
+          </p>
+        </div>
+
+        <select id="inflacaoFamilia" onchange="renderInflacaoContent(window.inflacaoBaseAtual || [])" style="max-width:220px;">
+          <option value="Alumínio">Alumínio</option>
+          <option value="Aço">Aço</option>
+        </select>
+      </div>
+
+      <div id="inflacaoContent"></div>
+    </section>
+
     <section class="table-wrap">
       <table>
         <thead>
@@ -1023,8 +1302,9 @@ function renderGeralContent(base){
       </table>
     </section>
   `;
-}
 
+  renderInflacaoContent(data);
+}
 /* =========================
    RANKING FORNECEDORES — GERADO PELO GERAL.CSV
 ========================= */
@@ -1119,7 +1399,7 @@ async function renderFornecedores(){
   try{
     await ensureGeralData();
     renderFornecedoresView(geralData);
-  } catch(error){
+  }catch(error){
     console.error("Erro Ranking Fornecedores:", error);
 
     app.innerHTML = `
@@ -1259,6 +1539,7 @@ function renderFornecedoresContent(base){
     </section>
   `;
 }
+
 /* =========================
    RANKING SAVING INPUTÁVEL — SUPABASE
 ========================= */
@@ -1353,7 +1634,6 @@ async function carregarSavingsLocal(){
 async function salvarSavingsLocal(){
   // Mantido por compatibilidade. No Supabase, as gravações são feitas por operação.
 }
-
 function calcularSavingRegistro(r){
   const categoria = r.categoria || "Saving";
   const tipo = r.tipo || "Spot";
@@ -1555,6 +1835,7 @@ function renderSavingContent(base){
         ${barLine("Impacto total", Math.abs(impactoHomologado), "bar-blue", money(impactoHomologado), maxResumo)}
       </div>
     </section>
+
     <section class="table-wrap">
       <table>
         <thead>
