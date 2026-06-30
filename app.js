@@ -126,7 +126,6 @@ function money(value){
 
 function moneyKg(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
-
   return `${money(value)}/kg`;
 }
 
@@ -390,9 +389,9 @@ function miniKpi(label, value, color = "blue"){
     <div style="
       background:#020617;
       border:1px solid #334155;
-      border-radius:16px;
-      padding:15px;
-      min-height:92px;
+      border-radius:14px;
+      padding:13px 14px;
+      min-height:82px;
       display:flex;
       flex-direction:column;
       justify-content:center;
@@ -400,14 +399,14 @@ function miniKpi(label, value, color = "blue"){
       <small style="
         color:#94a3b8;
         font-weight:800;
-        font-size:10px;
+        font-size:9px;
         letter-spacing:.7px;
         text-transform:uppercase;
-        margin-bottom:8px;
+        margin-bottom:7px;
       ">${esc(label)}</small>
       <strong class="${color}" style="
         display:block;
-        font-size:19px;
+        font-size:17px;
         font-weight:900;
         line-height:1.12;
         overflow-wrap:anywhere;
@@ -1065,16 +1064,35 @@ function renderInflacaoLineChart(rows, selectedMes){
     return `<div class="empty-state">Nenhuma compra encontrada para esta família no período filtrado.</div>`;
   }
 
-  const width = 980;
-  const height = 300;
-  const margin = {top:48, right:30, bottom:58, left:68};
+  const width = 920;
+  const height = 235;
+  const margin = {top:34, right:46, bottom:42, left:62};
   const chartW = width - margin.left - margin.right;
   const chartH = height - margin.top - margin.bottom;
+
+  const precoLabel = value => {
+    if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+
+    return `R$ ${Number(value).toLocaleString("pt-BR", {
+      minimumFractionDigits:2,
+      maximumFractionDigits:2
+    })}`;
+  };
+
+  const eixoLabel = value => {
+    if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+
+    return `R$ ${Number(value).toLocaleString("pt-BR", {
+      minimumFractionDigits:1,
+      maximumFractionDigits:1
+    })}`;
+  };
 
   const valores = [];
 
   rows.forEach(x => {
     if(x.precoInterno > 0) valores.push(x.precoInterno);
+    if(x.baseAnual?.precoInterno > 0) valores.push(x.baseAnual.precoInterno);
     if(x.indiceMercado > 0) valores.push(x.indiceMercado);
   });
 
@@ -1082,8 +1100,8 @@ function renderInflacaoLineChart(rows, selectedMes){
     return `<div class="empty-state">Não há valores suficientes para montar o gráfico.</div>`;
   }
 
-  const max = Math.max(...valores) * 1.12;
-  const minRaw = Math.min(...valores) * 0.94;
+  const max = Math.max(...valores) * 1.10;
+  const minRaw = Math.min(...valores) * 0.96;
   const min = Math.max(0, minRaw);
   const denom = max - min || 1;
 
@@ -1100,6 +1118,14 @@ function renderInflacaoLineChart(rows, selectedMes){
       return `${xPos(idx)},${yPos(x.precoInterno)}`;
     }).join(" ");
 
+  const rowsAnoAnterior = rows.filter(x => x.baseAnual?.precoInterno > 0);
+
+  const pointsAnoAnterior = rowsAnoAnterior
+    .map(x => {
+      const idx = rows.indexOf(x);
+      return `${xPos(idx)},${yPos(x.baseAnual.precoInterno)}`;
+    }).join(" ");
+
   const pointsMercado = rows
     .filter(x => x.indiceMercado > 0)
     .map(x => {
@@ -1107,13 +1133,13 @@ function renderInflacaoLineChart(rows, selectedMes){
       return `${xPos(idx)},${yPos(x.indiceMercado)}`;
     }).join(" ");
 
-  const grid = [0,1,2,3].map(i => {
-    const y = margin.top + (i / 3) * chartH;
-    const value = max - (i / 3) * denom;
+  const grid = [0,1,2].map(i => {
+    const y = margin.top + (i / 2) * chartH;
+    const value = max - (i / 2) * denom;
 
     return `
       <line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#1e293b" stroke-width="1" />
-      <text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" fill="#94a3b8" font-size="10" font-weight="700">${valorPontoKg(value)}</text>
+      <text x="${margin.left - 10}" y="${y + 3}" text-anchor="end" fill="#94a3b8" font-size="8.5" font-weight="700">${eixoLabel(value)}</text>
     `;
   }).join("");
 
@@ -1123,10 +1149,10 @@ function renderInflacaoLineChart(rows, selectedMes){
     return `
       <text
         x="${xPos(idx)}"
-        y="${height - 22}"
+        y="${height - 16}"
         text-anchor="middle"
         fill="${selected ? "#f8fafc" : "#94a3b8"}"
-        font-size="11"
+        font-size="9"
         font-weight="${selected ? "900" : "700"}"
       >${esc(x.label)}</text>
     `;
@@ -1135,25 +1161,41 @@ function renderInflacaoLineChart(rows, selectedMes){
   const labelsValorInterno = rows.map((x, idx) => {
     const y = yPos(x.precoInterno);
     const selected = x.mes === selectedMes;
-    const labelY = y < 58 ? y + 23 : y - 12;
+    const labelY = y < 48 ? y + 18 : y - 9;
+
+    let anchor = "middle";
+    let xLabel = xPos(idx);
+
+    if(idx === 0){
+      anchor = "start";
+      xLabel += 4;
+    }
+
+    if(idx === rows.length - 1){
+      anchor = "end";
+      xLabel -= 4;
+    }
+
+    const mostrarLabel = rows.length <= 14 || selected || idx === 0 || idx === rows.length - 1;
+    if(!mostrarLabel) return "";
 
     return `
       <text
-        x="${xPos(idx)}"
+        x="${xLabel}"
         y="${labelY}"
-        text-anchor="middle"
-        fill="${selected ? "#f8fafc" : "#e5e7eb"}"
-        font-size="${selected ? "12" : "10.5"}"
-        font-weight="900"
+        text-anchor="${anchor}"
+        fill="${selected ? "#f8fafc" : "#dbeafe"}"
+        font-size="${selected ? "9.8" : "8.7"}"
+        font-weight="800"
         style="cursor:pointer;"
         onclick="selecionarPontoInflacao('${x.mes}')"
-      >${valorPontoKg(x.precoInterno)}</text>
+      >${precoLabel(x.precoInterno)}</text>
     `;
   }).join("");
 
   const pontosInternos = rows.map((x, idx) => {
     const selected = x.mes === selectedMes;
-    const r = selected ? 8 : 5;
+    const r = selected ? 6.5 : 4.3;
 
     return `
       <circle
@@ -1162,11 +1204,31 @@ function renderInflacaoLineChart(rows, selectedMes){
         r="${r}"
         fill="${selected ? "#f8fafc" : "#38bdf8"}"
         stroke="${selected ? "#38bdf8" : "#020617"}"
-        stroke-width="${selected ? "4" : "2"}"
+        stroke-width="${selected ? "3" : "1.8"}"
         style="cursor:pointer;"
         onclick="selecionarPontoInflacao('${x.mes}')"
       >
-        <title>${x.label} • Linshalm: ${moneyKg(x.precoInterno)} • Volume: ${kgText(x.quantidadeTotal)}</title>
+        <title>${x.label} • Linshalm atual: ${moneyKg(x.precoInterno)} • Volume: ${kgText(x.quantidadeTotal)}</title>
+      </circle>
+    `;
+  }).join("");
+
+  const pontosAnoAnterior = rowsAnoAnterior.map(x => {
+    const idx = rows.indexOf(x);
+    const selected = x.mes === selectedMes;
+
+    return `
+      <circle
+        cx="${xPos(idx)}"
+        cy="${yPos(x.baseAnual.precoInterno)}"
+        r="${selected ? "5.2" : "3.6"}"
+        fill="#a78bfa"
+        stroke="#020617"
+        stroke-width="1.8"
+        style="cursor:pointer;"
+        onclick="selecionarPontoInflacao('${x.mes}')"
+      >
+        <title>${x.label} • Base anual ${x.baseAnual.label}: ${moneyKg(x.baseAnual.precoInterno)}</title>
       </circle>
     `;
   }).join("");
@@ -1179,10 +1241,10 @@ function renderInflacaoLineChart(rows, selectedMes){
       <circle
         cx="${xPos(idx)}"
         cy="${yPos(x.indiceMercado)}"
-        r="${selected ? "6" : "4"}"
+        r="${selected ? "5" : "3.4"}"
         fill="#f59e0b"
         stroke="#020617"
-        stroke-width="2"
+        stroke-width="1.8"
         style="cursor:pointer;"
         onclick="selecionarPontoInflacao('${x.mes}')"
       >
@@ -1191,12 +1253,20 @@ function renderInflacaoLineChart(rows, selectedMes){
     `;
   }).join("");
 
-  const linhaMercado = pointsMercado
-    ? `<polyline points="${pointsMercado}" fill="none" stroke="#f59e0b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />`
+  const linhaAnoAnterior = pointsAnoAnterior
+    ? `<polyline points="${pointsAnoAnterior}" fill="none" stroke="#a78bfa" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 5" />`
     : "";
 
+  const linhaMercado = pointsMercado
+    ? `<polyline points="${pointsMercado}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 5" />`
+    : "";
+
+  const legendaAnoAnterior = pointsAnoAnterior
+    ? `<span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:2px;background:#a78bfa;border-radius:999px;display:inline-block;"></i>Mesmo mês do ano anterior</span>`
+    : `<span style="color:#94a3b8;">Histórico anual não encontrado</span>`;
+
   const legendaMercado = pointsMercado
-    ? `<span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:24px;height:3px;background:#f59e0b;border-radius:999px;display:inline-block;"></i>Mercado / LME -1</span>`
+    ? `<span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:2px;background:#f59e0b;border-radius:999px;display:inline-block;"></i>Mercado / LME -1</span>`
     : `<span style="color:#94a3b8;">Índice externo não carregado</span>`;
 
   return `
@@ -1205,40 +1275,52 @@ function renderInflacaoLineChart(rows, selectedMes){
       overflow-x:auto;
       background:#020617;
       border:1px solid #1e293b;
-      border-radius:20px;
-      padding:12px;
+      border-radius:18px;
+      padding:10px;
       margin-top:12px;
+      display:flex;
+      justify-content:center;
     ">
-      <svg viewBox="0 0 ${width} ${height}" style="width:100%;min-width:760px;display:block;">
-        <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="#020617" />
+      <svg viewBox="0 0 ${width} ${height}" style="
+        width:100%;
+        max-width:1040px;
+        min-width:720px;
+        height:auto;
+        display:block;
+      ">
+        <rect x="0" y="0" width="${width}" height="${height}" rx="14" fill="#020617" />
 
         ${grid}
 
         <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}" stroke="#334155" stroke-width="1" />
         <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" stroke="#334155" stroke-width="1" />
 
-        <polyline points="${pointsInterno}" fill="none" stroke="#38bdf8" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
+        ${linhaAnoAnterior}
         ${linhaMercado}
+        <polyline points="${pointsInterno}" fill="none" stroke="#38bdf8" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" />
 
-        ${pontosInternos}
+        ${pontosAnoAnterior}
         ${pontosMercado}
+        ${pontosInternos}
+
         ${labelsValorInterno}
         ${labelsMes}
 
-        <text x="${margin.left}" y="24" fill="#cbd5e1" font-size="12" font-weight="900">R$/kg</text>
+        <text x="${margin.left}" y="20" fill="#cbd5e1" font-size="10" font-weight="900">R$/kg</text>
       </svg>
     </div>
 
     <div style="
       display:flex;
       align-items:center;
-      gap:18px;
+      gap:16px;
       flex-wrap:wrap;
       color:#cbd5e1;
-      font-size:12px;
-      margin:10px 0 0;
+      font-size:11px;
+      margin:8px 0 0;
     ">
-      <span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:24px;height:3px;background:#38bdf8;border-radius:999px;display:inline-block;"></i>Linshalm R$/kg</span>
+      <span style="display:inline-flex;align-items:center;gap:7px;"><i style="width:22px;height:2px;background:#38bdf8;border-radius:999px;display:inline-block;"></i>Linshalm atual</span>
+      ${legendaAnoAnterior}
       ${legendaMercado}
       <span style="color:#94a3b8;">Clique em um ponto para abrir a visão do mês.</span>
     </div>
@@ -1291,10 +1373,15 @@ function renderInflacaoContent(base){
     : renderInflacaoCardsPeriodo(resumo, inflacaoAnualPeriodo);
 
   const temIndice = data.some(x => x.indiceMercado > 0);
+  const temAnoAnterior = data.some(x => x.baseAnual?.precoInterno > 0);
 
-  const aviso = temIndice
-    ? `<div style="color:#94a3b8;font-size:12px;margin-top:10px;line-height:1.5;">Comparativo externo carregado a partir de <b>data/indices.csv</b>. O valor deve estar em R$/kg e já alinhado como mercado -1.</div>`
-    : `<div style="color:#94a3b8;font-size:12px;margin-top:10px;line-height:1.5;">Sem <b>data/indices.csv</b> carregado. O painel segue normalmente mostrando apenas a inflação interna Linshalm.</div>`;
+  const avisoIndice = temIndice
+    ? `Comparativo externo carregado a partir de <b>data/indices.csv</b>.`
+    : `Sem <b>data/indices.csv</b> carregado.`;
+
+  const avisoAnoAnterior = temAnoAnterior
+    ? `Linha roxa: comparação com o mesmo mês do ano anterior.`
+    : `Histórico anual ainda não encontrado para essa família/período.`;
 
   const acaoPonto = pontoSelecionado
     ? `<button type="button" onclick="limparPontoInflacao()" style="
@@ -1346,7 +1433,10 @@ function renderInflacaoContent(base){
 
     ${cards}
     ${renderInflacaoLineChart(data, pontoSelecionado?.mes || null)}
-    ${aviso}
+
+    <div style="color:#94a3b8;font-size:12px;margin-top:10px;line-height:1.5;">
+      ${avisoAnoAnterior} ${avisoIndice} Valores em R$/kg.
+    </div>
   `;
 }
 /* =========================
@@ -2121,6 +2211,7 @@ function renderFornecedoresContent(base){
     : 0;
 
   const topValor = [...stats].sort((a,b) => b.valorTotal - a.valorTotal).slice(0,10);
+
   const topRisco = [...stats].sort((a,b) => {
     if(a.performance !== b.performance) return a.performance - b.performance;
     return b.valorTotal - a.valorTotal;
@@ -2236,6 +2327,7 @@ function getSaving(row, names){
   for(const name of names){
     const target = keyClean(name);
     const found = keys.find(k => keyClean(k) === target);
+
     if(found) return row[found];
   }
 
@@ -2281,7 +2373,15 @@ function normalizarStatusSaving(status){
 function mapSavingRow(row){
   const id = getSaving(row, ["id", "uuid", "codigo", "código"]) || gerarIdLocal();
 
-  const dataRaw = getSaving(row, ["data", "created_at", "data registro", "data da negociação", "data negociacao"]);
+  const dataRaw = getSaving(row, [
+    "data",
+    "created_at",
+    "data registro",
+    "data da negociação",
+    "data negociacao",
+    "data negociação"
+  ]);
+
   const dataObj = parseDateSmart(dataRaw) || new Date();
 
   const valorAnterior = numberBR(getSaving(row, [
@@ -2312,14 +2412,53 @@ function mapSavingRow(row){
     "quantidade anual"
   ]));
 
-  const status = normalizarStatusSaving(getSaving(row, ["status", "situação", "situacao"]));
+  const status = normalizarStatusSaving(getSaving(row, [
+    "status",
+    "situação",
+    "situacao"
+  ]));
 
-  const comprador = getSaving(row, ["comprador", "responsavel", "responsável"]) || "Não informado";
-  const fornecedor = getSaving(row, ["fornecedor", "supplier"]) || "Não informado";
-  const categoria = getSaving(row, ["categoria", "grupo", "familia", "família"]) || "Não informado";
-  const descricao = getSaving(row, ["descricao", "descrição", "item", "produto", "negociacao", "negociação"]) || "Sem descrição";
-  const tipo = getSaving(row, ["tipo", "tipo saving", "classificacao", "classificação"]) || "Saving";
-  const observacao = getSaving(row, ["observacao", "observação", "obs", "comentario", "comentário"]) || "";
+  const comprador = getSaving(row, [
+    "comprador",
+    "responsavel",
+    "responsável"
+  ]) || "Não informado";
+
+  const fornecedor = getSaving(row, [
+    "fornecedor",
+    "supplier"
+  ]) || "Não informado";
+
+  const categoria = getSaving(row, [
+    "categoria",
+    "grupo",
+    "familia",
+    "família"
+  ]) || "Não informado";
+
+  const descricao = getSaving(row, [
+    "descricao",
+    "descrição",
+    "item",
+    "produto",
+    "negociacao",
+    "negociação"
+  ]) || "Sem descrição";
+
+  const tipo = getSaving(row, [
+    "tipo",
+    "tipo saving",
+    "classificacao",
+    "classificação"
+  ]) || "Saving";
+
+  const observacao = getSaving(row, [
+    "observacao",
+    "observação",
+    "obs",
+    "comentario",
+    "comentário"
+  ]) || "";
 
   const diferencaUnit = valorAnterior - valorNovo;
   const impacto = diferencaUnit * quantidade;
@@ -2878,7 +3017,11 @@ async function importarSavingCSV(){
 
   const objetos = rows.slice(1).map(row => {
     const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i] || "");
+
+    headers.forEach((h, i) => {
+      obj[h] = row[i] || "";
+    });
+
     return obj;
   });
 
@@ -2904,7 +3047,65 @@ async function importarSavingCSV(){
   await carregarSavingsLocal(true);
   renderSavingView(savingData);
 }
+/* =========================
+   COMPATIBILIDADE DOS BOTÕES DO MENU
+========================= */
 
+function irDashboardGeral(){
+  return renderGeral();
+}
+
+function irRankingFornecedores(){
+  return renderFornecedores();
+}
+
+function irRankingFornecedor(){
+  return renderFornecedores();
+}
+
+function irFornecedores(){
+  return renderFornecedores();
+}
+
+function renderRankingFornecedores(){
+  return renderFornecedores();
+}
+
+function renderRankingFornecedor(){
+  return renderFornecedores();
+}
+
+function rankingFornecedores(){
+  return renderFornecedores();
+}
+
+function rankingFornecedor(){
+  return renderFornecedores();
+}
+
+function irRankingSaving(){
+  return renderSaving();
+}
+
+function irSaving(){
+  return renderSaving();
+}
+
+function renderRankingSaving(){
+  return renderSaving();
+}
+
+function rankingSaving(){
+  return renderSaving();
+}
+
+function salvarSaving(){
+  return renderSaving();
+}
+
+function imprimirPedidosAtencao(){
+  return gerarRelatorioAtencao();
+}
 /* =========================
    INICIALIZAÇÃO
 ========================= */
