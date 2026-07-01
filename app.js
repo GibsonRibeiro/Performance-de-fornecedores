@@ -2542,8 +2542,88 @@ function getSaving(row, names){
   return get(row, names);
 }
 
-function getSavingLike(row, names){
-  return getLike(row, names);
+function limparNumeroSaving(valor){
+  return String(valor ?? "")
+    .replace(/\u00A0/g, " ")
+    .replace(/R\$/gi, "")
+    .replace(/%/g, "")
+    .trim();
+}
+
+function numSaving(valor){
+  if(valor === null || valor === undefined || valor === "") return 0;
+
+  if(typeof valor === "number"){
+    return Number.isFinite(valor) ? valor : 0;
+  }
+
+  let raw = limparNumeroSaving(valor);
+
+  if(!raw) return 0;
+
+  raw = raw.replace(/\s/g, "");
+
+  const temVirgula = raw.includes(",");
+  const temPonto = raw.includes(".");
+
+  if(temVirgula && temPonto){
+    raw = raw.replace(/\./g, "").replace(",", ".");
+    return Number(raw) || 0;
+  }
+
+  if(temVirgula){
+    raw = raw.replace(",", ".");
+    return Number(raw) || 0;
+  }
+
+  if(temPonto){
+    return Number(raw) || 0;
+  }
+
+  return Number(raw) || 0;
+}
+
+function pctSaving(valor){
+  const rawOriginal = String(valor ?? "").trim();
+
+  if(!rawOriginal) return 0;
+
+  let n = numSaving(valor);
+
+  if(!Number.isFinite(n)) return 0;
+
+  const veioComPercentual = rawOriginal.includes("%");
+
+  if(!veioComPercentual && Math.abs(n) > 0 && Math.abs(n) <= 1){
+    n = n * 100;
+  }
+
+  return n;
+}
+
+function moneySaving(value){
+  return Number(value || 0).toLocaleString("pt-BR", {
+    style:"currency",
+    currency:"BRL",
+    minimumFractionDigits:2,
+    maximumFractionDigits:2
+  });
+}
+
+function qtdSaving(value){
+  return Number(value || 0).toLocaleString("pt-BR", {
+    minimumFractionDigits:0,
+    maximumFractionDigits:3
+  });
+}
+
+function pctTextSaving(value){
+  if(!value) return "—";
+
+  return `${Number(value).toLocaleString("pt-BR", {
+    minimumFractionDigits:0,
+    maximumFractionDigits:6
+  })}%`;
 }
 
 function excelSerialToDate(serial){
@@ -2699,15 +2779,15 @@ function menorCompetidorSaving(original){
   const competidores = [
     {
       nome: original["Competidor A"],
-      preco: numberBR(original["Preço Competidor A"])
+      preco: numSaving(original["Preço Competidor A"])
     },
     {
       nome: original["Competidor B"],
-      preco: numberBR(original["Preço Competidor B"])
+      preco: numSaving(original["Preço Competidor B"])
     },
     {
       nome: original["Competidor C"],
-      preco: numberBR(original["Preço Competidor C"])
+      preco: numSaving(original["Preço Competidor C"])
     }
   ].filter(x => x.preco > 0);
 
@@ -2735,14 +2815,14 @@ function mapSavingRow(row){
   const data = original["Data"];
   const dataObj = parseDateSmart(data) || new Date();
 
-  const quantidade = numberBR(original["Quantidade"]);
-  const precoAtual = numberBR(original["Preço Atual"]);
+  const quantidade = numSaving(original["Quantidade"]);
+  const precoAtual = numSaving(original["Preço Atual"]);
 
   const melhorCompetidor = menorCompetidorSaving(original);
   const menorPrecoCompetidor = melhorCompetidor.preco;
 
-  const reajusteSolicitadoPct = numberBR(original["Reajuste Solicitado %"]);
-  const reajusteAcordadoPct = numberBR(original["Reajuste Acordado %"]);
+  const reajusteSolicitadoPct = pctSaving(original["Reajuste Solicitado %"]);
+  const reajusteAcordadoPct = pctSaving(original["Reajuste Acordado %"]);
 
   let savingCalculado = 0;
   let reajusteEvitado = 0;
@@ -2758,12 +2838,13 @@ function mapSavingRow(row){
   }
 
   if(categoria === "Reajuste"){
-    const reajusteSolicitadoValor = precoAtual * quantidade * (reajusteSolicitadoPct / 100);
-    const reajusteAcordadoValor = precoAtual * quantidade * (reajusteAcordadoPct / 100);
+    const base = precoAtual * quantidade;
+    const reajusteSolicitadoValor = base * (reajusteSolicitadoPct / 100);
+    const reajusteAcordadoValor = base * (reajusteAcordadoPct / 100);
 
     reajusteEvitado = Math.max(0, reajusteSolicitadoValor - reajusteAcordadoValor);
     reajusteCalculado = Math.max(0, reajusteAcordadoValor);
-    impacto = reajusteEvitado - reajusteCalculado;
+    impacto = reajusteCalculado;
   }
 
   return {
@@ -2788,11 +2869,11 @@ function mapSavingRow(row){
     precoAtual,
 
     competidorA: original["Competidor A"],
-    precoCompetidorA: numberBR(original["Preço Competidor A"]),
+    precoCompetidorA: numSaving(original["Preço Competidor A"]),
     competidorB: original["Competidor B"],
-    precoCompetidorB: numberBR(original["Preço Competidor B"]),
+    precoCompetidorB: numSaving(original["Preço Competidor B"]),
     competidorC: original["Competidor C"],
-    precoCompetidorC: numberBR(original["Preço Competidor C"]),
+    precoCompetidorC: numSaving(original["Preço Competidor C"]),
 
     melhorCompetidor: melhorCompetidor.nome,
     menorPrecoCompetidor,
@@ -2861,10 +2942,13 @@ function valorPayloadSaving(header, value){
   if(
     h.includes("quantidade") ||
     h.includes("preco") ||
-    h.includes("preço") ||
-    h.includes("reajuste")
+    h.includes("preço")
   ){
-    return numberBR(value);
+    return numSaving(value);
+  }
+
+  if(h.includes("reajuste")){
+    return pctSaving(value);
   }
 
   return value || "";
@@ -2878,7 +2962,6 @@ function montarPayloadSupabaseSaving(rowOuRegistro){
   const idRegistro = rowOuRegistro.id || gerarIdLocal();
   const payload = {};
 
-  // A tua tabela do Supabase exige ID. Então ID sempre vai preenchido.
   payload.id = idRegistro;
 
   if(savingRawColumns.length){
@@ -2909,16 +2992,16 @@ function montarPayloadSupabaseSaving(rowOuRegistro){
     descricao: original["Descrição"],
     fornecedor_atual: original["Fornecedor Atual"],
     status: original["Status"],
-    quantidade: numberBR(original["Quantidade"]),
-    preco_atual: numberBR(original["Preço Atual"]),
+    quantidade: numSaving(original["Quantidade"]),
+    preco_atual: numSaving(original["Preço Atual"]),
     competidor_a: original["Competidor A"],
-    preco_competidor_a: numberBR(original["Preço Competidor A"]),
+    preco_competidor_a: numSaving(original["Preço Competidor A"]),
     competidor_b: original["Competidor B"],
-    preco_competidor_b: numberBR(original["Preço Competidor B"]),
+    preco_competidor_b: numSaving(original["Preço Competidor B"]),
     competidor_c: original["Competidor C"],
-    preco_competidor_c: numberBR(original["Preço Competidor C"]),
-    reajuste_solicitado: numberBR(original["Reajuste Solicitado %"]),
-    reajuste_acordado: numberBR(original["Reajuste Acordado %"]),
+    preco_competidor_c: numSaving(original["Preço Competidor C"]),
+    reajuste_solicitado: pctSaving(original["Reajuste Solicitado %"]),
+    reajuste_acordado: pctSaving(original["Reajuste Acordado %"]),
     observacao: original["Observação"]
   };
 }
@@ -3105,10 +3188,10 @@ function calcularResumoSaving(data){
   const savingHomologado = homologados.reduce((s,x) => s + x.savingCalculado, 0);
   const savingEmCurso = curso.reduce((s,x) => s + x.savingCalculado, 0);
 
-  const reajusteImpacto = ativos.reduce((s,x) => s + x.reajusteCalculado, 0);
+  const reajusteAcordado = ativos.reduce((s,x) => s + x.reajusteCalculado, 0);
   const reajusteEvitado = ativos.reduce((s,x) => s + x.reajusteEvitado, 0);
 
-  const impactoLiquido = ativos.reduce((s,x) => s + x.impacto, 0);
+  const impactoLiquido = savingHomologado + savingEmCurso + reajusteEvitado - reajusteAcordado;
 
   return {
     registros:data.length,
@@ -3118,7 +3201,7 @@ function calcularResumoSaving(data){
     declinados:declinados.length,
     savingHomologado,
     savingEmCurso,
-    reajusteImpacto,
+    reajusteAcordado,
     reajusteEvitado,
     impactoLiquido
   };
@@ -3188,7 +3271,7 @@ function abrirModalSaving(categoriaInicial = "Saving"){
 
               <div class="form-group">
                 <label>Quantidade</label>
-                <input id="savingQuantidade" placeholder="Ex.: 1000" inputmode="decimal">
+                <input id="savingQuantidade" placeholder="Ex.: 1000 ou 110.853" inputmode="decimal">
               </div>
 
               <div class="form-group">
@@ -3276,14 +3359,14 @@ function renderSavingContent(base){
   const porComprador = Object.values(group(ativos, "comprador"))
     .map(g => ({
       nome:g.nome,
-      valor:g.items.reduce((s,x) => s + x.savingCalculado + x.reajusteEvitado + x.reajusteCalculado, 0)
+      valor:g.items.reduce((s,x) => s + x.savingCalculado + x.reajusteEvitado, 0)
     }))
     .sort((a,b) => b.valor - a.valor);
 
   const porFornecedor = Object.values(group(ativos, "fornecedor"))
     .map(g => ({
       nome:g.nome,
-      valor:g.items.reduce((s,x) => s + x.savingCalculado + x.reajusteEvitado + x.reajusteCalculado, 0)
+      valor:g.items.reduce((s,x) => s + x.savingCalculado + x.reajusteEvitado, 0)
     }))
     .sort((a,b) => b.valor - a.valor)
     .slice(0,10);
@@ -3300,11 +3383,11 @@ function renderSavingContent(base){
   content.innerHTML = `
     <section class="kpis">
       ${kpi("Registros filtrados", resumo.registros, "blue")}
-      ${kpi("Saving homologado", money(resumo.savingHomologado), "green")}
-      ${kpi("Saving em curso", money(resumo.savingEmCurso), "yellow")}
-      ${kpi("Reajuste acordado", money(resumo.reajusteImpacto), "orange")}
-      ${kpi("Reajuste evitado", money(resumo.reajusteEvitado), "green")}
-      ${kpi("Impacto líquido", money(resumo.impactoLiquido), resumo.impactoLiquido >= 0 ? "green" : "red")}
+      ${kpi("Saving homologado", moneySaving(resumo.savingHomologado), "green")}
+      ${kpi("Saving em curso", moneySaving(resumo.savingEmCurso), "yellow")}
+      ${kpi("Reajuste acordado", moneySaving(resumo.reajusteAcordado), "orange")}
+      ${kpi("Reajuste evitado", moneySaving(resumo.reajusteEvitado), "green")}
+      ${kpi("Impacto líquido", moneySaving(resumo.impactoLiquido), resumo.impactoLiquido >= 0 ? "green" : "red")}
       ${kpi("Homologados", resumo.homologados, "green")}
       ${kpi("Em homologação", resumo.curso, "yellow")}
       ${kpi("Declinados", resumo.declinados, "red")}
@@ -3324,16 +3407,16 @@ function renderSavingContent(base){
 
     <section class="panel-grid">
       <div class="panel">
-        <h2>Saving / impacto por comprador</h2>
+        <h2>Saving / evitado por comprador</h2>
         ${porComprador.length ? porComprador.map(x => {
-          return barLine(x.nome, x.valor, "bar-green", money(x.valor), porComprador[0]?.valor || 1);
+          return barLine(x.nome, x.valor, "bar-green", moneySaving(x.valor), porComprador[0]?.valor || 1);
         }).join("") : `<div class="empty-state">Sem registros ativos para o período.</div>`}
       </div>
 
       <div class="panel">
-        <h2>Top fornecedores por saving / impacto</h2>
+        <h2>Top fornecedores por saving / evitado</h2>
         ${porFornecedor.length ? porFornecedor.map(x => {
-          return barLine(x.nome, x.valor, "bar-blue", money(x.valor), porFornecedor[0]?.valor || 1);
+          return barLine(x.nome, x.valor, "bar-blue", moneySaving(x.valor), porFornecedor[0]?.valor || 1);
         }).join("") : `<div class="empty-state">Sem fornecedores para o período.</div>`}
       </div>
 
@@ -3381,15 +3464,15 @@ function renderSavingContent(base){
                 ${x.observacao ? `<br><small>${esc(x.observacao)}</small>` : ""}
               </td>
               <td><b>${esc(x.fornecedor || "—")}</b></td>
-              <td>${Number(x.quantidade || 0).toLocaleString("pt-BR", {maximumFractionDigits:2})}</td>
-              <td>${money(x.precoAtual)}</td>
+              <td>${qtdSaving(x.quantidade)}</td>
+              <td>${moneySaving(x.precoAtual)}</td>
               <td>${esc(x.melhorCompetidor || "—")}</td>
-              <td>${x.menorPrecoCompetidor ? money(x.menorPrecoCompetidor) : "—"}</td>
-              <td><b class="green">${money(x.savingCalculado)}</b></td>
-              <td>${x.reajusteSolicitadoPct ? `${String(x.reajusteSolicitadoPct).replace(".", ",")}%` : "—"}</td>
-              <td>${x.reajusteAcordadoPct ? `${String(x.reajusteAcordadoPct).replace(".", ",")}%` : "—"}</td>
-              <td><b class="green">${money(x.reajusteEvitado)}</b></td>
-              <td><b class="orange">${money(x.reajusteCalculado)}</b></td>
+              <td>${x.menorPrecoCompetidor ? moneySaving(x.menorPrecoCompetidor) : "—"}</td>
+              <td><b class="green">${moneySaving(x.savingCalculado)}</b></td>
+              <td>${pctTextSaving(x.reajusteSolicitadoPct)}</td>
+              <td>${pctTextSaving(x.reajusteAcordadoPct)}</td>
+              <td><b class="green">${moneySaving(x.reajusteEvitado)}</b></td>
+              <td><b class="orange">${moneySaving(x.reajusteCalculado)}</b></td>
               <td>
                 <select class="status-select" onchange="alterarStatusSaving('${jsArg(x.id)}', this.value)">
                   ${STATUS_SAVING.map(status => `
