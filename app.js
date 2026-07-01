@@ -75,14 +75,17 @@ const MASCARAS_INFLACAO = [
   { familia:"Aço", subfamilia:"Barras Aço", prefixo:"1.09.03" },
   { familia:"Aço", subfamilia:"Cantoneiras", prefixo:"1.09.02" },
   { familia:"Aço", subfamilia:"Tubos Aço", prefixo:"1.09.01.01" },
+
   { familia:"Alumínio", subfamilia:"Chapas Alumínio", prefixo:"1.02.01" },
-  { familia:"Alumínio", subfamilia:"Bobina Alumínio", prefixo:"1.02.02" }
+  { familia:"Alumínio", subfamilia:"Bobina Alumínio", prefixo:"1.02.02" },
+  { familia:"Alumínio", subfamilia:"Perfis Alumínio", prefixo:"1.02.03" }
 ];
 
 const OPCOES_INFLACAO = [
   { id:"Alumínio|Consolidado", label:"Alumínio — Consolidado", familia:"Alumínio", subfamilia:"" },
   { id:"Alumínio|Chapas Alumínio", label:"Chapas Alumínio", familia:"Alumínio", subfamilia:"Chapas Alumínio" },
   { id:"Alumínio|Bobina Alumínio", label:"Bobina Alumínio", familia:"Alumínio", subfamilia:"Bobina Alumínio" },
+  { id:"Alumínio|Perfis Alumínio", label:"Perfis Alumínio", familia:"Alumínio", subfamilia:"Perfis Alumínio" },
 
   { id:"Aço|Consolidado", label:"Aço — Consolidado", familia:"Aço", subfamilia:"" },
   { id:"Aço|Chapas Aço Planas", label:"Chapas Aço Planas", familia:"Aço", subfamilia:"Chapas Aço Planas" },
@@ -794,14 +797,30 @@ function mapIndicesRows(rows){
     const mes = mesNumero ? String(mesNumero).padStart(2,"0") : "";
 
     const familia = get(r, ["Familia", "Família"]);
+
+    const subfamilia = get(r, [
+      "Subfamilia",
+      "Subfamília",
+      "Sub Familia",
+      "Sub Família",
+      "Sub-Familia",
+      "Sub-Família"
+    ]);
+
     const indice = get(r, ["Indice", "Índice"]);
-    const valor = numberBR(get(r, ["Valor", "Valor R$/kg", "Valor BRL KG", "Valor_BRL_KG"]));
+    const valor = numberBR(get(r, [
+      "Valor",
+      "Valor R$/kg",
+      "Valor BRL KG",
+      "Valor_BRL_KG"
+    ]));
 
     return {
       ano,
       mes,
       key: ano && mes ? `${ano}-${mes}` : "",
       familia,
+      subfamilia:String(subfamilia || "").trim(),
       indice,
       valor
     };
@@ -822,8 +841,152 @@ async function ensureIndicesData(){
   }
 }
 
-function buscarIndiceMercado(familia, mesKey){
-  return indicesData.find(x => norm(x.familia) === norm(familia) && x.key === mesKey) || null;
+function indiceExternoEhGeral(item){
+  return !String(item?.subfamilia || "").trim();
+}
+
+function resumirIndicesMercado(lista, fallbackNome){
+  const validos = (lista || []).filter(x => x && x.valor > 0);
+
+  if(!validos.length) return null;
+
+  const valorMedio = validos.reduce((s,x) => s + x.valor, 0) / validos.length;
+
+  const nomes = [...new Set(validos.map(x => x.indice).filter(Boolean))];
+
+  const nomeIndice = nomes.length === 1
+    ? nomes[0]
+    : fallbackNome;
+
+  return {
+    ...validos[0],
+    indice:nomeIndice,
+    valor:valorMedio,
+    quantidadeIndices:validos.length,
+    itens:validos
+  };
+}
+
+function buscarIndiceMercado(familia, mesKey, subfamilia = ""){
+  const familiaNorm = norm(familia);
+  const subfamiliaNorm = norm(subfamilia);
+
+  const baseMesFamilia = indicesData.filter(x => {
+    return norm(x.familia) === familiaNorm &&
+      x.key === mesKey;
+  });
+
+  if(!baseMesFamilia.length){
+    return null;
+  }
+
+  if(subfamiliaNorm){
+    const especificos = baseMesFamilia.filter(x => {
+      return norm(x.subfamilia) === subfamiliaNorm;
+    });
+
+    if(especificos.length){
+      const resumo = resumirIndicesMercado(especificos, `${subfamilia} mercado -1`);
+
+      return {
+        ...resumo,
+        origemIndice:"Específico"
+      };
+    }
+  }
+
+  const gerais = baseMesFamilia.filter(indiceExternoEhGeral);
+
+  if(gerais.length){
+    const resumo = resumirIndicesMercado(gerais, `${familia} mercado -1`);
+
+    return {
+      ...resumo,
+      origemIndice:"Geral"
+    };
+  }
+
+  return null;
+}
+
+function calcularIndiceMercadoPonderado(familia, mesKey, linhas){
+  const linhasValidas = (linhas || []).filter(x => {
+    return x &&
+      x.mesRecebimento === mesKey &&
+      x.quantidade > 0 &&
+      x.familiaInflacao === familia;
+  });
+
+  if(!linhasValidas.length){
+    return null;
+  }
+
+  const gruposSubfamilia = Object.values(group(linhasValidas, "subfamiliaInflacao"));
+
+  const detalhes = gruposSubfamilia.map(g => {
+    const subfamilia = g.nome === "Não informado" ? "" : g.nome;
+
+    const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
+    const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
+    const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
+
+    const indice = buscarIndiceMercado(familia, mesKey, subfamilia);
+
+    return {
+      subfamilia,
+      quantidadeTotal,
+      valorTotal,
+      precoInterno,
+      indice
+    };
+  });
+
+  const comIndice = detalhes.filter(x => {
+    return x.indice &&
+      x.indice.valor > 0 &&
+      x.quantidadeTotal > 0;
+  });
+
+  if(!comIndice.length){
+    return null;
+  }
+
+  const quantidadePonderada = comIndice.reduce((s,x) => s + x.quantidadeTotal, 0);
+
+  if(!quantidadePonderada){
+    return null;
+  }
+
+  const valorPonderado = comIndice.reduce((s,x) => {
+    return s + (x.indice.valor * x.quantidadeTotal);
+  }, 0) / quantidadePonderada;
+
+  const temEspecifico = comIndice.some(x => x.indice.origemIndice === "Específico");
+  const temGeral = comIndice.some(x => x.indice.origemIndice === "Geral");
+
+  let nomeIndice = `${familia} mercado -1`;
+
+  if(temEspecifico && temGeral){
+    nomeIndice = `${familia} ponderado — específico + geral`;
+  }else if(temEspecifico){
+    nomeIndice = `${familia} ponderado — índices específicos`;
+  }else if(temGeral){
+    nomeIndice = `${familia} ponderado — índice geral`;
+  }
+
+  return {
+    ano:mesKey.split("-")[0],
+    mes:mesKey.split("-")[1],
+    key:mesKey,
+    familia,
+    subfamilia:"Consolidado",
+    indice:nomeIndice,
+    valor:valorPonderado,
+    origemIndice:"Ponderado",
+    quantidadeIndices:comIndice.length,
+    quantidadePonderada,
+    detalhes
+  };
 }
 
 /* =========================
@@ -995,6 +1158,42 @@ function filtrarBaseInflacao(base, opcaoId){
   });
 }
 
+function calcularBaseComparativaIndice(indice, quantidadeTotal, valorTotal, precoInterno){
+  if(!indice || !indice.valor){
+    return {
+      quantidadeIndice:0,
+      precoInternoComparativo:null,
+      coberturaIndicePercentual:null
+    };
+  }
+
+  if(Array.isArray(indice.detalhes) && indice.detalhes.length){
+    const detalhesComIndice = indice.detalhes.filter(x => {
+      return x &&
+        x.indice &&
+        x.indice.valor > 0 &&
+        x.quantidadeTotal > 0;
+    });
+
+    const quantidadeComIndice = detalhesComIndice.reduce((s,x) => s + x.quantidadeTotal, 0);
+    const valorComIndice = detalhesComIndice.reduce((s,x) => s + x.valorTotal, 0);
+
+    if(quantidadeComIndice > 0){
+      return {
+        quantidadeIndice:quantidadeComIndice,
+        precoInternoComparativo:valorComIndice / quantidadeComIndice,
+        coberturaIndicePercentual:quantidadeTotal > 0 ? (quantidadeComIndice / quantidadeTotal) * 100 : null
+      };
+    }
+  }
+
+  return {
+    quantidadeIndice:quantidadeTotal,
+    precoInternoComparativo:precoInterno,
+    coberturaIndicePercentual:100
+  };
+}
+
 function gerarInflacaoMensal(base, opcaoId){
   const opcao = getOpcaoInflacao(opcaoId);
   const linhas = filtrarBaseInflacao(base, opcaoId);
@@ -1005,15 +1204,25 @@ function gerarInflacaoMensal(base, opcaoId){
       const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
       const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
 
-      const indice = buscarIndiceMercado(opcao.familia, g.nome);
+      const indice = opcao.subfamilia
+        ? buscarIndiceMercado(opcao.familia, g.nome, opcao.subfamilia)
+        : calcularIndiceMercadoPonderado(opcao.familia, g.nome, g.items);
+
       const valorIndice = indice ? indice.valor : null;
 
-      const diferencaPercentual = valorIndice && valorIndice > 0
-        ? ((precoInterno / valorIndice) - 1) * 100
+      const baseComparativa = calcularBaseComparativaIndice(
+        indice,
+        quantidadeTotal,
+        valorTotal,
+        precoInterno
+      );
+
+      const diferencaPercentual = valorIndice && valorIndice > 0 && baseComparativa.precoInternoComparativo > 0
+        ? ((baseComparativa.precoInternoComparativo / valorIndice) - 1) * 100
         : null;
 
-      const impactoEstimado = valorIndice
-        ? (precoInterno - valorIndice) * quantidadeTotal
+      const impactoEstimado = valorIndice && baseComparativa.quantidadeIndice > 0
+        ? (baseComparativa.precoInternoComparativo - valorIndice) * baseComparativa.quantidadeIndice
         : null;
 
       return {
@@ -1025,14 +1234,21 @@ function gerarInflacaoMensal(base, opcaoId){
         nomeOpcao:opcao.label,
 
         precoInterno,
+        precoInternoComparativo:baseComparativa.precoInternoComparativo,
+
         indiceMercado:valorIndice,
         nomeIndice:indice?.indice || "Mercado -1",
+        origemIndice:indice?.origemIndice || "",
 
         diferencaPercentual,
         impactoEstimado,
 
         quantidadeTotal,
-        valorTotal
+        quantidadeIndice:baseComparativa.quantidadeIndice,
+        coberturaIndicePercentual:baseComparativa.coberturaIndicePercentual,
+
+        valorTotal,
+        indiceDetalhes:indice?.detalhes || []
       };
     })
     .sort((a,b) => a.mes.localeCompare(b.mes));
@@ -1095,32 +1311,52 @@ function calcularResumoInflacaoPeriodo(base, opcaoId){
     ? ((ultimo.precoInterno / primeiro.precoInterno) - 1) * 100
     : null;
 
-  const indicesValidos = meses.filter(x => x.indiceMercado > 0 && x.quantidadeTotal > 0);
+  const indicesValidos = meses.filter(x => {
+    return x.indiceMercado > 0 &&
+      x.quantidadeIndice > 0 &&
+      x.precoInternoComparativo > 0;
+  });
 
-  const indicePonderado = indicesValidos.length
-    ? indicesValidos.reduce((s,x) => s + (x.indiceMercado * x.quantidadeTotal), 0) /
-      indicesValidos.reduce((s,x) => s + x.quantidadeTotal, 0)
+  const quantidadeComIndice = indicesValidos.reduce((s,x) => s + x.quantidadeIndice, 0);
+
+  const indicePonderado = quantidadeComIndice > 0
+    ? indicesValidos.reduce((s,x) => s + (x.indiceMercado * x.quantidadeIndice), 0) / quantidadeComIndice
     : null;
 
-  const diferencaVsMercado = indicePonderado && indicePonderado > 0
-    ? ((precoMedio / indicePonderado) - 1) * 100
+  const precoMedioComparativo = quantidadeComIndice > 0
+    ? indicesValidos.reduce((s,x) => s + (x.precoInternoComparativo * x.quantidadeIndice), 0) / quantidadeComIndice
     : null;
 
-  const impactoEstimado = indicePonderado
-    ? (precoMedio - indicePonderado) * quantidadeTotal
+  const diferencaVsMercado = indicePonderado && indicePonderado > 0 && precoMedioComparativo > 0
+    ? ((precoMedioComparativo / indicePonderado) - 1) * 100
+    : null;
+
+  const impactoEstimado = indicePonderado && precoMedioComparativo !== null
+    ? (precoMedioComparativo - indicePonderado) * quantidadeComIndice
+    : null;
+
+  const coberturaIndicePercentual = quantidadeTotal > 0 && quantidadeComIndice > 0
+    ? (quantidadeComIndice / quantidadeTotal) * 100
     : null;
 
   return {
     opcao,
     linhas,
     meses,
+
     valorTotal,
     quantidadeTotal,
     precoMedio,
+
     primeiro,
     ultimo,
     variacaoPeriodo,
+
     indicePonderado,
+    precoMedioComparativo,
+    quantidadeComIndice,
+    coberturaIndicePercentual,
+
     diferencaVsMercado,
     impactoEstimado
   };
