@@ -11,6 +11,7 @@ const FILES = {
   geral: "./data/geral.csv",
   saving: "./data/saving.csv",
   indices: "./data/indices.csv",
+  pesosPerfis: "./data/pesos-perfis-aluminio.csv",
   historico: {
     "2026": "./data/geral.csv",
     "2025": "./data/2025.csv",
@@ -18,7 +19,6 @@ const FILES = {
     "2023": "./data/2023.csv"
   }
 };
-
 /* =========================
    SUPABASE
 ========================= */
@@ -145,9 +145,11 @@ const TIPOS_SAVING = [
 let geralData = [];
 let savingData = [];
 let indicesData = [];
+let pesosPerfisData = [];
 
 let savingRawColumns = [];
 let indicesTentouCarregar = false;
+let pesosPerfisTentouCarregar = false;
 let inflacaoPontoSelecionado = null;
 let appInicializado = false;
 
@@ -163,7 +165,6 @@ function ensureAppElement(){
 
   return app;
 }
-
 /* =========================
    HELPERS BASE
 ========================= */
@@ -808,6 +809,7 @@ function mapIndicesRows(rows){
     ]);
 
     const indice = get(r, ["Indice", "Índice"]);
+
     const valor = numberBR(get(r, [
       "Valor",
       "Valor R$/kg",
@@ -851,7 +853,6 @@ function resumirIndicesMercado(lista, fallbackNome){
   if(!validos.length) return null;
 
   const valorMedio = validos.reduce((s,x) => s + x.valor, 0) / validos.length;
-
   const nomes = [...new Set(validos.map(x => x.indice).filter(Boolean))];
 
   const nomeIndice = nomes.length === 1
@@ -913,7 +914,7 @@ function calcularIndiceMercadoPonderado(familia, mesKey, linhas){
   const linhasValidas = (linhas || []).filter(x => {
     return x &&
       x.mesRecebimento === mesKey &&
-      x.quantidade > 0 &&
+      x.quantidadeInflacao > 0 &&
       x.familiaInflacao === familia;
   });
 
@@ -926,7 +927,7 @@ function calcularIndiceMercadoPonderado(familia, mesKey, linhas){
   const detalhes = gruposSubfamilia.map(g => {
     const subfamilia = g.nome === "Não informado" ? "" : g.nome;
 
-    const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
+    const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidadeInflacao, 0);
     const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
     const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
 
@@ -987,6 +988,104 @@ function calcularIndiceMercadoPonderado(familia, mesKey, linhas){
     quantidadePonderada,
     detalhes
   };
+}
+
+/* =========================
+   PESOS — PERFIS DE ALUMÍNIO
+========================= */
+
+function normalizarCodigoProdutoPeso(valor){
+  return String(valor || "")
+    .trim()
+    .replace(/\.0$/,"")
+    .replace(/,0$/,"")
+    .replace(/\D/g,"");
+}
+
+function mapPesosPerfisRows(rows){
+  return rows.map(r => {
+    const produto = get(r, [
+      "Produto",
+      "Código Produto",
+      "Codigo Produto",
+      "Cod Produto",
+      "Item"
+    ]);
+
+    const descricaoProduto = get(r, [
+      "Descricao Produto",
+      "Descrição Produto",
+      "Descricao",
+      "Descrição"
+    ]);
+
+    const pesoPorPecaKg = numberBR(get(r, [
+      "PesoPorPecaKg",
+      "Peso Por Peca Kg",
+      "Peso Por Peça Kg",
+      "Peso por peça kg",
+      "Peso Kg",
+      "Kg por peça",
+      "Kg por peca"
+    ]));
+
+    return {
+      produto:String(produto || "").trim(),
+      produtoKey:normalizarCodigoProdutoPeso(produto),
+      descricaoProduto,
+      pesoPorPecaKg
+    };
+  }).filter(x => x.produtoKey && x.pesoPorPecaKg > 0);
+}
+
+async function ensurePesosPerfisData(){
+  if(pesosPerfisTentouCarregar) return;
+
+  pesosPerfisTentouCarregar = true;
+
+  try{
+    const rows = await loadCSV(FILES.pesosPerfis, false);
+    pesosPerfisData = mapPesosPerfisRows(rows);
+  }catch(error){
+    console.warn("pesos-perfis-aluminio.csv não carregado. Perfis de alumínio seguirão usando quantidade original.", error);
+    pesosPerfisData = [];
+  }
+}
+
+function buscarPesoPerfilProduto(produto){
+  const produtoKey = normalizarCodigoProdutoPeso(produto);
+
+  if(!produtoKey){
+    return null;
+  }
+
+  return pesosPerfisData.find(x => x.produtoKey === produtoKey) || null;
+}
+
+function calcularQuantidadeInflacaoKg(produto, subfamiliaInflacao, quantidadeOriginal){
+  const quantidade = Number(quantidadeOriginal || 0);
+
+  if(norm(subfamiliaInflacao) !== norm("Perfis Alumínio")){
+    return quantidade;
+  }
+
+  const peso = buscarPesoPerfilProduto(produto);
+
+  if(!peso || !peso.pesoPorPecaKg){
+    return quantidade;
+  }
+
+  return quantidade * peso.pesoPorPecaKg;
+}
+
+function obterPesoPerfilKg(produto, subfamiliaInflacao){
+  if(norm(subfamiliaInflacao) !== norm("Perfis Alumínio")){
+    return null;
+  }
+
+  const peso = buscarPesoPerfilProduto(produto);
+
+  return peso?.pesoPorPecaKg || null;
 }
 
 /* =========================
@@ -1057,6 +1156,35 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 
     const prazoPagamento = CONDICOES_PAGAMENTO[condicaoPagamento] ?? 0;
 
+    const produto = get(r, [
+      "Produto",
+      "Cod Produto",
+      "Código Produto",
+      "Codigo Produto",
+      "Item"
+    ]);
+
+    const descricaoProduto = get(r, [
+      "Descrição Produto",
+      "Descricao Produto",
+      "Desc Produto",
+      "Produto Descrição",
+      "Produto Descricao"
+    ]);
+
+    const fornecedor = get(r, [
+      "Descrição Fornecedor",
+      "Descricao Fornecedor",
+      "Fornecedor",
+      "Nome Fornecedor"
+    ]);
+
+    const comprador = get(r, [
+      "Nome Comprador",
+      "Comprador",
+      "Buyer"
+    ]);
+
     const mascaraEntrada = get(r, [
       "Máscara de Entrada",
       "Mascara de Entrada",
@@ -1065,6 +1193,24 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
     ]);
 
     const inflacao = classificarMascaraInflacao(mascaraEntrada);
+
+    const familiaInflacao = inflacao?.familia || "";
+    const subfamiliaInflacao = inflacao?.subfamilia || "";
+
+    const pesoPerfilKg = obterPesoPerfilKg(produto, subfamiliaInflacao);
+
+    const quantidadeInflacao = calcularQuantidadeInflacaoKg(
+      produto,
+      subfamiliaInflacao,
+      quantidade
+    );
+
+    const precoUnitarioInflacao = quantidadeInflacao > 0
+      ? valor / quantidadeInflacao
+      : 0;
+
+    const conversaoInflacaoAplicada = !!pesoPerfilKg &&
+      norm(subfamiliaInflacao) === norm("Perfis Alumínio");
 
     const faixa = calcularFaixa(previsaoInicialObj, dataRecebimentoObj);
     const entregue = !!dataRecebimentoObj;
@@ -1085,17 +1231,23 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       anoBase:String(anoBase),
 
       pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido", "Numero Pedido"]),
-      produto: get(r, ["Produto", "Cod Produto", "Código Produto", "Codigo Produto", "Item"]),
-      descricaoProduto: get(r, ["Descrição Produto", "Descricao Produto", "Desc Produto", "Produto Descrição", "Produto Descricao"]),
-      fornecedor: get(r, ["Descrição Fornecedor", "Descricao Fornecedor", "Fornecedor", "Nome Fornecedor"]),
-      comprador: get(r, ["Nome Comprador", "Comprador", "Buyer"]),
+      produto,
+      descricaoProduto,
+      fornecedor,
+      comprador,
 
       mascaraEntrada,
-      familiaInflacao: inflacao?.familia || "",
-      subfamiliaInflacao: inflacao?.subfamilia || "",
+      familiaInflacao,
+      subfamiliaInflacao,
 
       quantidade,
+      quantidadeOriginal:quantidade,
+      quantidadeInflacao,
+      pesoPerfilKg,
       precoUnitario,
+      precoUnitarioInflacao,
+      conversaoInflacaoAplicada,
+
       valor,
 
       condicaoPagamento,
@@ -1121,6 +1273,8 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 async function ensureGeralData(){
   if(geralData.length) return;
 
+  await ensurePesosPerfisData();
+
   const carregados = [];
 
   for(const ano of ANOS_HISTORICO){
@@ -1143,17 +1297,28 @@ async function ensureGeralData(){
    CÁLCULO INFLACIONÁRIO
 ========================= */
 
+function quantidadeInflacaoLinha(x){
+  const quantidadeConvertida = Number(x?.quantidadeInflacao || 0);
+
+  if(quantidadeConvertida > 0){
+    return quantidadeConvertida;
+  }
+
+  return Number(x?.quantidade || 0);
+}
+
 function filtrarBaseInflacao(base, opcaoId){
   const opcao = getOpcaoInflacao(opcaoId);
 
   return base.filter(x => {
     const familiaOk = x.familiaInflacao === opcao.familia;
     const subfamiliaOk = !opcao.subfamilia || x.subfamiliaInflacao === opcao.subfamilia;
+    const quantidadeKg = quantidadeInflacaoLinha(x);
 
     return familiaOk &&
       subfamiliaOk &&
       x.mesRecebimento &&
-      x.quantidade > 0 &&
+      quantidadeKg > 0 &&
       x.valor > 0;
   });
 }
@@ -1201,7 +1366,7 @@ function gerarInflacaoMensal(base, opcaoId){
   const grupos = Object.values(group(linhas, "mesRecebimento"))
     .map(g => {
       const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
-      const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
+      const quantidadeTotal = g.items.reduce((s,x) => s + quantidadeInflacaoLinha(x), 0);
       const precoInterno = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
 
       const indice = opcao.subfamilia
@@ -1300,7 +1465,7 @@ function calcularResumoInflacaoPeriodo(base, opcaoId){
   const opcao = getOpcaoInflacao(opcaoId);
 
   const valorTotal = linhas.reduce((s,x) => s + x.valor, 0);
-  const quantidadeTotal = linhas.reduce((s,x) => s + x.quantidade, 0);
+  const quantidadeTotal = linhas.reduce((s,x) => s + quantidadeInflacaoLinha(x), 0);
   const precoMedio = quantidadeTotal > 0 ? valorTotal / quantidadeTotal : 0;
 
   const meses = gerarInflacaoMensal(base, opcaoId);
@@ -1395,11 +1560,11 @@ function calcularInflacaoAnualPeriodo(baseFiltrada, opcaoId, baseComparativa){
     });
 
   const valorAtual = linhasAtuais.reduce((s,x) => s + x.valor, 0);
-  const qtdAtual = linhasAtuais.reduce((s,x) => s + x.quantidade, 0);
+  const qtdAtual = linhasAtuais.reduce((s,x) => s + quantidadeInflacaoLinha(x), 0);
   const precoAtual = qtdAtual > 0 ? valorAtual / qtdAtual : 0;
 
   const valorAnterior = linhasAnoAnterior.reduce((s,x) => s + x.valor, 0);
-  const qtdAnterior = linhasAnoAnterior.reduce((s,x) => s + x.quantidade, 0);
+  const qtdAnterior = linhasAnoAnterior.reduce((s,x) => s + quantidadeInflacaoLinha(x), 0);
   const precoAnterior = qtdAnterior > 0 ? valorAnterior / qtdAnterior : 0;
 
   if(!precoAtual || !precoAnterior){
@@ -1415,6 +1580,7 @@ function calcularInflacaoAnualPeriodo(baseFiltrada, opcaoId, baseComparativa){
     mesesComparados: mesesAtuais.length
   };
 }
+
 /* =========================
    INFLAÇÃO — CARDS E GRÁFICO
 ========================= */
