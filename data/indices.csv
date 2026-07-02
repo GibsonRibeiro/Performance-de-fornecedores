@@ -1,19 +1,37 @@
-﻿Ano;Mês;Familia;Indice;Valor
-2024;12;Alumínio;Alumínio mercado;30,25010294
-2025;1;Alumínio;Alumínio mercado;30,23960401
-2025;2;Alumínio;Alumínio mercado;29,56374505
-2025;3;Alumínio;Alumínio mercado;29,14077507
-2025;4;Alumínio;Alumínio mercado;27,16186564
-2025;5;Alumínio;Alumínio mercado;27,11988381
-2025;6;Alumínio;Alumínio mercado;27,06031643
-2025;7;Alumínio;Alumínio mercado;27,52550605
-2025;8;Alumínio;Alumínio mercado;27,27935563
-2025;9;Alumínio;Alumínio mercado;27,4205023
-2025;10;Alumínio;Alumínio mercado;28,57362945
-2025;11;Alumínio;Alumínio mercado;29,16644796
-2025;12;Alumínio;Alumínio mercado;30,6890723
-2026;1;Alumínio;Alumínio mercado;32,11438249
-2026;2;Alumínio;Alumínio mercado;31,02004988
-2026;3;Alumínio;Alumínio mercado;33,70665388
-2026;4;Alumínio;Alumínio mercado;34,9659173
-2026;5;Alumínio;Alumínio mercado;35,30230147
+﻿Ano;Mês;Familia;Subfamilia;Indice;Valor
+2025;1;Alumínio;;Alumínio mercado;30,25010294
+2025;2;Alumínio;;Alumínio mercado;30,23960401
+2025;3;Alumínio;;Alumínio mercado;29,56374505
+2025;4;Alumínio;;Alumínio mercado;29,14077507
+2025;5;Alumínio;;Alumínio mercado;27,16186564
+2025;6;Alumínio;;Alumínio mercado;27,11988381
+2025;7;Alumínio;;Alumínio mercado;27,06031643
+2025;8;Alumínio;;Alumínio mercado;27,52550605
+2025;9;Alumínio;;Alumínio mercado;27,27935563
+2025;10;Alumínio;;Alumínio mercado;27,4205023
+2025;11;Alumínio;;Alumínio mercado;28,57362945
+2025;12;Alumínio;;Alumínio mercado;29,16644796
+2026;1;Alumínio;;Alumínio mercado;30,6890723
+2026;2;Alumínio;;Alumínio mercado;32,11438249
+2026;3;Alumínio;;Alumínio mercado;31,02004988
+2026;4;Alumínio;;Alumínio mercado;33,70665388
+2026;5;Alumínio;;Alumínio mercado;34,9659173
+2026;6;Alumínio;;Alumínio mercado;35,30230147
+2025;1;Alumínio;Perfis Alumínio;Alumínio mercado;32,25360908
+2025;2;Alumínio;Perfis Alumínio;Alumínio mercado;32,24311015
+2025;3;Alumínio;Perfis Alumínio;Alumínio mercado;31,56725119
+2025;4;Alumínio;Perfis Alumínio;Alumínio mercado;31,1442812
+2025;5;Alumínio;Perfis Alumínio;Alumínio mercado;29,16537178
+2025;6;Alumínio;Perfis Alumínio;Alumínio mercado;29,12338994
+2025;7;Alumínio;Perfis Alumínio;Alumínio mercado;29,06382257
+2025;8;Alumínio;Perfis Alumínio;Alumínio mercado;29,52901219
+2025;9;Alumínio;Perfis Alumínio;Alumínio mercado;29,28286176
+2025;10;Alumínio;Perfis Alumínio;Alumínio mercado;29,42400843
+2025;11;Alumínio;Perfis Alumínio;Alumínio mercado;30,57713558
+2025;12;Alumínio;Perfis Alumínio;Alumínio mercado;31,16995409
+2026;1;Alumínio;Perfis Alumínio;Alumínio mercado;32,5673593
+2026;2;Alumínio;Perfis Alumínio;Alumínio mercado;33,9926695
+2026;3;Alumínio;Perfis Alumínio;Alumínio mercado;32,89833689
+2026;4;Alumínio;Perfis Alumínio;Alumínio mercado;35,58494088
+2026;5;Alumínio;Perfis Alumínio;Alumínio mercado;36,8442043
+2026;6;Alumínio;Perfis Alumínio;Alumínio mercado;37,18058847
