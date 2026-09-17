@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portal Performance de Compras — Linshalm</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <img src="logo-linshalm.png" alt="Linshalm" class="logo" />
+
+      <nav class="menu" aria-label="Navegação principal">
+        <button type="button" class="nav-btn active" data-page="geral">Dashboard</button>
+        <button type="button" class="nav-btn" data-page="fornecedores">Fornecedores</button>
+        <button type="button" class="nav-btn" data-page="saving">Saving</button>
+        <button
+          type="button"
+          class="nav-btn danger-btn"
+          onclick="gerarRelatorioAtencao()"
+          title="Gerar relatório de pedidos em atenção"
+        >Pedidos em atenção</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app"></main>
+
+  <footer class="signature">
+    Desenvolvido por Gibson C Ribeiro
+  </footer>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
