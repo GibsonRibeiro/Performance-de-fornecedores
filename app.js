@@ -1,6 +1,6 @@
 /* =========================================================
    LINSHALM COMPRAS — APP.JS COMPLETO
-   Dashboard Geral | Ranking Fornecedores | Ranking Saving
+   Dashboard Geral | Performance de Fornecedores | Ranking Saving
 ========================================================= */
 
 /* =========================
@@ -237,6 +237,26 @@ function parseDateBR(text){
   date.setHours(0,0,0,0);
 
   return date;
+}
+
+function parseDateListBR(text){
+  const raw = String(text || "").trim();
+  if(!raw) return [];
+
+  const matches = raw.match(/\b\d{2}\/\d{2}\/\d{4}\b|\b\d{4}-\d{2}-\d{2}\b/g) || [];
+
+  return matches
+    .map(parseDateBR)
+    .filter(Boolean)
+    .sort((a,b) => a - b);
+}
+
+function primeiraData(lista){
+  return Array.isArray(lista) && lista.length ? lista[0] : null;
+}
+
+function ultimaData(lista){
+  return Array.isArray(lista) && lista.length ? lista[lista.length - 1] : null;
 }
 
 function normalizeDate(date){
@@ -599,6 +619,19 @@ function percentText(value){
 
 function kgText(value){
   return `${Number(value || 0).toLocaleString("pt-BR", {maximumFractionDigits:0})} kg`;
+}
+
+function dateTextBR(date){
+  return date ? normalizeDate(date).toLocaleDateString("pt-BR") : "—";
+}
+
+function quantidadeText(value, unidade = ""){
+  const numero = Number(value || 0).toLocaleString("pt-BR", {
+    minimumFractionDigits:0,
+    maximumFractionDigits:3
+  });
+
+  return unidade ? `${numero} ${unidade}` : numero;
 }
 
 function valorPontoKg(value){
@@ -1108,13 +1141,50 @@ function calcularFaixa(previsaoInicialObj, dataRecebimentoObj){
 }
 
 function mapGeralRows(rows, anoBase = ANO_PADRAO){
-  return rows.map(r => {
+  const assinaturasVistas = new Set();
+  const rowsSemDuplicacaoExata = rows.filter(r => {
+    const pedidoLinha = get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido", "Numero Pedido"]);
+    const itemLinha = get(r, ["Item", "Item Pedido", "Número Item", "Numero Item"]);
+
+    if(!pedidoLinha || !itemLinha) return true;
+
+    const assinatura = `${pedidoLinha}::${itemLinha}::${JSON.stringify(r)}`;
+
+    if(assinaturasVistas.has(assinatura)){
+      console.warn("Linha duplicada ignorada na base geral:", get(r, ["Pedido"]), get(r, ["Item"]));
+      return false;
+    }
+
+    assinaturasVistas.add(assinatura);
+    return true;
+  });
+
+  return rowsSemDuplicacaoExata.map(r => {
     const quantidade = numberBR(get(r, [
       "Quantidade Compra",
       "Qtd Compra",
       "Quantidade",
       "Qtd"
     ]));
+
+    const quantidadeAtendidaRaw = get(r, [
+      "Quantidade Compra Atend.",
+      "Quantidade Compra Atendida",
+      "Qtd Compra Atend.",
+      "Qtd Atendida"
+    ]);
+
+    const quantidadeSaldoRaw = get(r, [
+      "Quantidade Compra Saldo",
+      "Saldo Quantidade Compra",
+      "Qtd Compra Saldo",
+      "Saldo em Aberto"
+    ]);
+
+    const quantidadeAtendida = numberBR(quantidadeAtendidaRaw);
+    const quantidadeSaldo = numberBR(quantidadeSaldoRaw);
+    const temControleAtendimento = String(quantidadeAtendidaRaw).trim() !== "" ||
+      String(quantidadeSaldoRaw).trim() !== "";
 
     const precoUnitario = numberBR(get(r, [
       "Preço Unit. Compra",
@@ -1134,7 +1204,9 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       "Data de Recebimento"
     ]);
 
-    const dataRecebimentoObj = parseDateBR(dataRecebimento);
+    const datasRecebimento = parseDateListBR(dataRecebimento);
+    const primeiraDataRecebimentoObj = primeiraData(datasRecebimento);
+    const dataRecebimentoObj = ultimaData(datasRecebimento);
 
     const previsaoInicial = get(r, [
       "Previsão Entrega Inicial",
@@ -1160,8 +1232,23 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       "Produto",
       "Cod Produto",
       "Código Produto",
-      "Codigo Produto",
-      "Item"
+      "Codigo Produto"
+    ]);
+
+    const itemPedido = get(r, [
+      "Item",
+      "Item Pedido",
+      "Número Item",
+      "Numero Item",
+      "Sequência Item",
+      "Sequencia Item"
+    ]);
+
+    const unidadeCompra = get(r, [
+      "Unidade de Compra",
+      "Unidade Compra",
+      "Unidade",
+      "UN"
     ]);
 
     const descricaoProduto = get(r, [
@@ -1179,10 +1266,24 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       "Nome Fornecedor"
     ]);
 
+    const fornecedorCodigo = get(r, [
+      "Fornecedor",
+      "Código Fornecedor",
+      "Codigo Fornecedor",
+      "Cod Fornecedor"
+    ]);
+
     const comprador = get(r, [
       "Nome Comprador",
       "Comprador",
       "Buyer"
+    ]);
+
+    const situacaoPedido = get(r, [
+      "Situação Pedido",
+      "Situacao Pedido",
+      "Status Pedido",
+      "Situação"
     ]);
 
     const mascaraEntrada = get(r, [
@@ -1212,8 +1313,24 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
     const conversaoInflacaoAplicada = !!pesoPerfilKg &&
       norm(subfamiliaInflacao) === norm("Perfis Alumínio");
 
-    const faixa = calcularFaixa(previsaoInicialObj, dataRecebimentoObj);
-    const entregue = !!dataRecebimentoObj;
+    let statusAtendimento = "Em aberto";
+
+    if(temControleAtendimento){
+      if(quantidadeSaldo <= 0){
+        statusAtendimento = "Atendido em plenitude";
+      }else if(quantidadeAtendida > 0){
+        statusAtendimento = "Atendido parcial";
+      }
+    }else if(norm(situacaoPedido).includes("parcial")){
+      statusAtendimento = "Atendido parcial";
+    }else if(norm(situacaoPedido).includes("atendido") || dataRecebimentoObj){
+      statusAtendimento = "Atendido em plenitude";
+    }
+
+    const entregue = statusAtendimento === "Atendido em plenitude";
+    const parcial = statusAtendimento === "Atendido parcial";
+    const emAberto = statusAtendimento === "Em aberto";
+    const faixa = calcularFaixa(previsaoInicialObj, entregue ? dataRecebimentoObj : null);
 
     const diasAtrasoEntrega = entregue && dataLimiteOperacionalObj
       ? Math.max(0, diffDays(dataRecebimentoObj, dataLimiteOperacionalObj))
@@ -1231,16 +1348,24 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       anoBase:String(anoBase),
 
       pedido: get(r, ["Pedido", "Número Pedido", "Nº Pedido", "Num Pedido", "Numero Pedido"]),
+      itemPedido,
       produto,
       descricaoProduto,
       fornecedor,
+      fornecedorCodigo,
       comprador,
+      unidadeCompra,
+      situacaoPedido,
+      statusAtendimento,
 
       mascaraEntrada,
       familiaInflacao,
       subfamiliaInflacao,
 
       quantidade,
+      quantidadeAtendida,
+      quantidadeSaldo,
+      temControleAtendimento,
       quantidadeOriginal:quantidade,
       quantidadeInflacao,
       pesoPerfilKg,
@@ -1255,10 +1380,14 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 
       faixa,
       entregue,
+      parcial,
+      emAberto,
       entregueNoPrazo,
       atraso: entregue ? diasAtrasoEntrega : atrasoAberto,
 
       dataRecebimento,
+      datasRecebimento,
+      primeiraDataRecebimentoObj,
       dataRecebimentoObj,
       mesRecebimento: monthKeyFromDate(dataRecebimentoObj),
       mesRecebimentoNum: dataRecebimentoObj ? dataRecebimentoObj.getMonth() + 1 : null,
@@ -2038,6 +2167,16 @@ function faixaClass(faixa){
   return "badge-gray";
 }
 
+function statusAtendimentoClass(status){
+  const s = norm(status);
+
+  if(s.includes("plenitude")) return "badge-green";
+  if(s.includes("parcial")) return "badge-yellow";
+  if(s.includes("aberto")) return "badge-orange";
+
+  return "badge-gray";
+}
+
 async function renderGeral(){
   const root = ensureAppElement();
   if(!root) return;
@@ -2073,6 +2212,7 @@ function renderGeralView(base){
   const compradores = uniqueOptions(base, "comprador");
   const fornecedores = uniqueOptions(base, "fornecedor");
   const faixas = uniqueOptions(base, "faixa");
+  const statusAtendimento = ["Atendido em plenitude", "Atendido parcial", "Em aberto"];
 
   root.innerHTML = `
     <section class="hero">
@@ -2087,7 +2227,8 @@ function renderGeralView(base){
       {type:"select", id:"geralComprador", label:"Todos compradores", options:compradores},
       {type:"select", id:"geralFornecedor", label:"Todos fornecedores", options:fornecedores},
       {type:"text", id:"geralPedido", placeholder:"Buscar por número do pedido"},
-      {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas}
+      {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas},
+      {type:"select", id:"geralAtendimento", label:"Todos status de atendimento", options:statusAtendimento}
     ])}
 
     <div id="geralContent"></div>
@@ -2096,7 +2237,7 @@ function renderGeralView(base){
   aplicarPeriodoPadrao("geral");
 
   attachFilterEvents(
-    ["geralAno","geralMesInicial","geralMesFinal","geralComprador","geralFornecedor","geralPedido","geralFaixa"],
+    ["geralAno","geralMesInicial","geralMesFinal","geralComprador","geralFornecedor","geralPedido","geralFaixa","geralAtendimento"],
     () => {
       inflacaoPontoSelecionado = null;
       renderGeralContent(base);
@@ -2111,13 +2252,15 @@ function filterGeral(base){
   const fornecedor = getFilterValue("geralFornecedor");
   const pedido = norm(getFilterValue("geralPedido"));
   const faixa = getFilterValue("geralFaixa");
+  const atendimento = getFilterValue("geralAtendimento");
 
   return base.filter(x => {
     return passaFiltroAnoPeriodo(x, "geral") &&
       (!comprador || x.comprador === comprador) &&
       (!fornecedor || x.fornecedor === fornecedor) &&
       (!pedido || norm(x.pedido).includes(pedido)) &&
-      (!faixa || x.faixa === faixa);
+      (!faixa || x.faixa === faixa) &&
+      (!atendimento || x.statusAtendimento === atendimento);
   });
 }
 
@@ -2126,6 +2269,7 @@ function filterGeralComparativaInflacao(base){
   const fornecedor = getFilterValue("geralFornecedor");
   const pedido = norm(getFilterValue("geralPedido"));
   const faixa = getFilterValue("geralFaixa");
+  const atendimento = getFilterValue("geralAtendimento");
   const {ini, fim} = getPeriodoMes("geral");
 
   return base.filter(x => {
@@ -2133,6 +2277,7 @@ function filterGeralComparativaInflacao(base){
     if(fornecedor && x.fornecedor !== fornecedor) return false;
     if(pedido && !norm(x.pedido).includes(pedido)) return false;
     if(faixa && x.faixa !== faixa) return false;
+    if(atendimento && x.statusAtendimento !== atendimento) return false;
 
     if(ini !== null && fim !== null){
       if(!x.dataRecebimentoObj) return false;
@@ -2149,6 +2294,10 @@ function aplicarFiltroGeralFaixa(faixa){
   setFilterAndTrigger("geralFaixa", faixa);
 }
 
+function aplicarFiltroGeralAtendimento(status){
+  setFilterAndTrigger("geralAtendimento", status);
+}
+
 function aplicarFiltroGeralMes(mes){
   aplicarFiltroPeriodoMes("geral", mes);
 }
@@ -2161,6 +2310,7 @@ function limparFiltrosGeral(){
   setFilterValue("geralFornecedor", "");
   setFilterValue("geralPedido", "");
   setFilterValue("geralFaixa", "");
+  setFilterValue("geralAtendimento", "");
 
   triggerFilter("geralAno");
 }
@@ -2181,6 +2331,8 @@ function renderGeralContent(base){
   const alerta = countFaixa("Alerta");
   const dentro = countFaixa("Dentro do prazo");
   const entregues = countFaixa("Entregue");
+  const parciais = data.filter(x => x.parcial).length;
+  const emAberto = data.filter(x => x.emAberto).length;
 
   const totalComprado = data.reduce((sum, x) => sum + x.valor, 0);
 
@@ -2246,10 +2398,12 @@ function renderGeralContent(base){
       ${kpi("Crítico", criticos, "orange", "aplicarFiltroGeralFaixa('Crítico')")}
       ${kpi("Alerta", alerta, "yellow", "aplicarFiltroGeralFaixa('Alerta')")}
       ${kpi("Dentro do prazo", dentro, "green", "aplicarFiltroGeralFaixa('Dentro do prazo')")}
-      ${kpi("Entregues", entregues, "blue", "aplicarFiltroGeralFaixa('Entregue')")}
+      ${kpi("Atendidos em plenitude", entregues, "green", "aplicarFiltroGeralAtendimento('Atendido em plenitude')")}
+      ${kpi("Atendidos parcialmente", parciais, "yellow", "aplicarFiltroGeralAtendimento('Atendido parcial')")}
+      ${kpi("Totalmente em aberto", emAberto, "orange", "aplicarFiltroGeralAtendimento('Em aberto')")}
       ${kpi("Total comprado", money(totalComprado), "blue")}
       ${kpi("Prazo médio", `${prazoMedioPonderado} dias`, "blue")}
-      ${kpi("Entregues no prazo", `${perfEntrega}%`, "green")}
+      ${kpi("Entregas plenas no prazo", `${perfEntrega}%`, corPerformanceFornecedor(perfEntrega))}
     </section>
 
     <section class="panel-grid">
@@ -2361,18 +2515,22 @@ function renderGeralContent(base){
         <thead>
           <tr>
             <th>Pedido</th>
+            <th>Item</th>
             <th>Produto</th>
             <th>Descrição Produto</th>
             <th>Fornecedor</th>
             <th>Comprador</th>
-            <th>Qtd</th>
+            <th>Qtd. comprada</th>
+            <th>Qtd. atendida</th>
+            <th>Saldo</th>
+            <th>Status atendimento</th>
             <th>Preço Unit.</th>
             <th>Valor</th>
             <th>Condição</th>
             <th>Prazo Pgto</th>
             <th>Faixa</th>
             <th>Atraso</th>
-            <th>Data recebimento</th>
+            <th>Último recebimento</th>
             <th>Previsão Entrega Inicial</th>
           </tr>
         </thead>
@@ -2381,18 +2539,22 @@ function renderGeralContent(base){
           ${data.slice(0, 1500).map(x => `
             <tr>
               <td>${esc(x.pedido || "—")}</td>
+              <td>${esc(x.itemPedido || "—")}</td>
               <td>${esc(x.produto || "—")}</td>
               <td>${esc(x.descricaoProduto || "—")}</td>
               <td><b>${esc(x.fornecedor || "—")}</b></td>
               <td>${esc(x.comprador || "—")}</td>
-              <td>${Number(x.quantidade || 0).toLocaleString("pt-BR", {maximumFractionDigits:2})}</td>
+              <td>${quantidadeText(x.quantidade, x.unidadeCompra)}</td>
+              <td>${quantidadeText(x.quantidadeAtendida, x.unidadeCompra)}</td>
+              <td>${quantidadeText(x.quantidadeSaldo, x.unidadeCompra)}</td>
+              <td><span class="badge ${statusAtendimentoClass(x.statusAtendimento)}">${esc(x.statusAtendimento)}</span></td>
               <td>${money(x.precoUnitario)}</td>
               <td>${money(x.valor)}</td>
               <td>${esc(x.condicaoPagamento || "—")}</td>
               <td>${x.prazoPagamento} dias</td>
               <td><span class="badge ${faixaClass(x.faixa)}">${esc(x.faixa || "—")}</span></td>
               <td>${x.atraso}</td>
-              <td>${esc(x.dataRecebimento || "—")}</td>
+              <td>${esc(dateTextBR(x.dataRecebimentoObj))}</td>
               <td>${esc(x.previsaoInicial || "—")}</td>
             </tr>
           `).join("")}
@@ -2419,16 +2581,24 @@ async function gerarRelatorioAtencao(){
   const comprador = getFilterValue("geralComprador");
   const fornecedor = getFilterValue("geralFornecedor");
   const pedidoBusca = norm(getFilterValue("geralPedido"));
+  const faixa = getFilterValue("geralFaixa");
+  const atendimento = getFilterValue("geralAtendimento");
+  const ano = getFilterValue("geralAno") || ANO_PADRAO;
+  const mesInicial = getFilterValue("geralMesInicial");
+  const mesFinal = getFilterValue("geralMesFinal");
 
-  const base = filterGeral(geralData).filter(x => {
+  const base = geralData.filter(x => {
     const dias = daysUntil(x.previsaoInicialObj);
 
-    return !x.entregue &&
+    return passaFiltroAnoPeriodo(x, "geral", "previsaoInicialObj") &&
+      !x.entregue &&
       dias !== null &&
       dias <= 10 &&
       (!comprador || x.comprador === comprador) &&
       (!fornecedor || x.fornecedor === fornecedor) &&
-      (!pedidoBusca || norm(x.pedido).includes(pedidoBusca));
+      (!pedidoBusca || norm(x.pedido).includes(pedidoBusca)) &&
+      (!faixa || x.faixa === faixa) &&
+      (!atendimento || x.statusAtendimento === atendimento);
   }).sort((a,b) => {
     const da = daysUntil(a.previsaoInicialObj);
     const db = daysUntil(b.previsaoInicialObj);
@@ -2436,8 +2606,10 @@ async function gerarRelatorioAtencao(){
     return da - db;
   });
 
-  const total = base.reduce((s,x) => s + x.valor, 0);
-  const atrasados = base.filter(x => daysUntil(x.previsaoInicialObj) < 0).length;
+  const valorSaldo = base.reduce((s,x) => s + (x.quantidadeSaldo * x.precoUnitario), 0);
+  const atrasados = base.filter(x => daysUntil(x.previsaoInicialObj) < 0);
+  const pedidosAtrasados = new Set(atrasados.map(x => x.pedido).filter(Boolean)).size;
+  const parciais = base.filter(x => x.parcial).length;
 
   const vencendo = base.filter(x => {
     const d = daysUntil(x.previsaoInicialObj);
@@ -2446,6 +2618,9 @@ async function gerarRelatorioAtencao(){
 
   const tituloComprador = comprador || "Todos os compradores";
   const dataEmissao = new Date().toLocaleDateString("pt-BR");
+  const periodoMes = mesInicial || mesFinal
+    ? `${mesInicial || "Janeiro"} a ${mesFinal || "Dezembro"}`
+    : "Todos os meses";
 
   const html = `
 <!DOCTYPE html>
@@ -2462,24 +2637,30 @@ async function gerarRelatorioAtencao(){
   h1{font-size:25px;margin:0;color:#f8fafc;}
   .sub{color:#94a3b8;margin-top:7px;font-size:13px;}
   .print-btn{margin-top:12px;background:#dc2626;color:white;border:0;border-radius:10px;padding:10px 16px;font-weight:bold;cursor:pointer;}
-  .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:18px 0;}
+  .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:18px 0;}
   .card{border:1px solid #334155;border-radius:14px;padding:13px;background:#0f172a;}
   .card small{display:block;color:#94a3b8;font-size:11px;text-transform:uppercase;font-weight:bold;}
   .card strong{display:block;margin-top:7px;font-size:20px;color:#f8fafc;}
   .criteria{font-size:12px;color:#cbd5e1;background:#0f172a;border:1px solid #334155;border-radius:12px;padding:13px;margin-bottom:16px;line-height:1.6;}
-  table{width:100%;border-collapse:collapse;font-size:11px;background:#020617;border:1px solid #334155;}
+  table{width:100%;border-collapse:collapse;font-size:10px;background:#020617;border:1px solid #334155;}
   th{background:#111827;color:#f8fafc;text-align:left;padding:8px;border-bottom:1px solid #334155;}
   td{border-bottom:1px solid #1e293b;padding:7px;vertical-align:top;color:#e5e7eb;}
   tr:nth-child(even){background:#0f172a;}
+  .num{text-align:right;white-space:nowrap;}
+  .status{font-weight:bold;white-space:nowrap;}
+  .partial{color:#facc15;}
+  .open{color:#fb923c;}
   .late{color:#f87171;font-weight:bold;}
   .soon{color:#facc15;font-weight:bold;}
   .footer{margin-top:18px;font-size:10px;color:#94a3b8;text-align:right;}
   @media print{
+    @page{size:landscape;margin:8mm;}
     body{background:#020617;color:#f8fafc;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
     .print-btn{display:none;}
-    .page{padding:14px;}
-    table{font-size:9px;}
-    th,td{padding:5px;}
+    .page{padding:8px;}
+    table{font-size:7.5px;}
+    thead{display:table-header-group;}
+    th,td{padding:4px;}
   }
 </style>
 </head>
@@ -2499,16 +2680,20 @@ async function gerarRelatorioAtencao(){
 
   <div class="meta">
     <div class="card"><small>Comprador</small><strong>${esc(tituloComprador)}</strong></div>
-    <div class="card"><small>Linhas em atenção</small><strong>${base.length}</strong></div>
-    <div class="card"><small>Atrasados</small><strong>${atrasados}</strong></div>
+    <div class="card"><small>Itens em atenção</small><strong>${base.length}</strong></div>
+    <div class="card"><small>Itens parciais</small><strong>${parciais}</strong></div>
+    <div class="card"><small>Pedidos atrasados</small><strong>${pedidosAtrasados}</strong></div>
     <div class="card"><small>Vencendo em até 10 dias</small><strong>${vencendo}</strong></div>
   </div>
 
   <div class="criteria">
-    <b>Critério:</b> linhas não entregues com <b>Previsão Entrega Inicial</b> já vencida ou vencendo em até 10 dias.
+    <b>Critério:</b> itens em aberto ou atendidos parcialmente, com <b>Previsão Entrega Inicial</b> já vencida ou vencendo em até 10 dias.
+    <br><b>Período da previsão inicial:</b> ${esc(ano)} — ${esc(periodoMes)}
     ${fornecedor ? `<br><b>Fornecedor filtrado:</b> ${esc(fornecedor)}` : ""}
     ${pedidoBusca ? `<br><b>Pedido filtrado:</b> ${esc(pedidoBusca)}` : ""}
-    <br><b>Valor total em atenção:</b> ${money(total)}
+    ${faixa ? `<br><b>Faixa filtrada:</b> ${esc(faixa)}` : ""}
+    ${atendimento ? `<br><b>Status filtrado:</b> ${esc(atendimento)}` : ""}
+    <br><b>Valor estimado do saldo em atenção:</b> ${money(valorSaldo)}
     <br><b>Emitido em:</b> ${dataEmissao}
   </div>
 
@@ -2516,11 +2701,16 @@ async function gerarRelatorioAtencao(){
     <thead>
       <tr>
         <th>Pedido</th>
+        <th>Item</th>
         <th>Produto</th>
         <th>Descrição Produto</th>
         <th>Fornecedor</th>
         <th>Comprador</th>
-        <th>Valor</th>
+        <th class="num">Comprada</th>
+        <th class="num">Atendida</th>
+        <th class="num">Saldo</th>
+        <th>Status</th>
+        <th class="num">Valor saldo</th>
         <th>Previsão Entrega Inicial</th>
         <th>Dias</th>
       </tr>
@@ -2533,11 +2723,16 @@ async function gerarRelatorioAtencao(){
         return `
           <tr>
             <td>${esc(x.pedido)}</td>
+            <td>${esc(x.itemPedido || "—")}</td>
             <td>${esc(x.produto)}</td>
             <td>${esc(x.descricaoProduto)}</td>
             <td>${esc(x.fornecedor)}</td>
             <td>${esc(x.comprador)}</td>
-            <td>${money(x.valor)}</td>
+            <td class="num">${quantidadeText(x.quantidade, x.unidadeCompra)}</td>
+            <td class="num">${quantidadeText(x.quantidadeAtendida, x.unidadeCompra)}</td>
+            <td class="num"><b>${quantidadeText(x.quantidadeSaldo, x.unidadeCompra)}</b></td>
+            <td class="status ${x.parcial ? "partial" : "open"}">${esc(x.statusAtendimento)}</td>
+            <td class="num">${money(x.quantidadeSaldo * x.precoUnitario)}</td>
             <td>${esc(x.previsaoInicial)}</td>
             <td class="${cls}">${esc(diasTexto(dias))}</td>
           </tr>
@@ -2565,7 +2760,7 @@ async function gerarRelatorioAtencao(){
 }
 
 /* =========================
-   RANKING FORNECEDORES / KRALJIC
+   PERFORMANCE DE FORNECEDORES
 ========================= */
 
 function fornecedorKey(nome){
@@ -2581,12 +2776,16 @@ function isFornecedorEstrategico(nome){
   return FORNECEDORES_ESTRATEGICOS_FIXOS.some(fixo => fornecedorKey(fixo) === chave);
 }
 
-function classificarFornecedorKraljic(stats){
+function classificarFornecedor(stats){
   if(isFornecedorEstrategico(stats.nome)){
     return "Estratégico";
   }
 
   if(stats.pedidosUnicos <= 1){
+    return "Não crítico";
+  }
+
+  if(stats.performance === null || stats.performance === undefined){
     return "Não crítico";
   }
 
@@ -2613,28 +2812,76 @@ function categoriaFornecedorClass(categoria){
 }
 
 function corPerformanceFornecedor(value){
+  if(value === null || value === undefined) return "blue";
   if(value >= 80) return "green";
   if(value >= 60) return "yellow";
   return "red";
 }
 
+function performanceFornecedorText(value){
+  return value === null || value === undefined ? "Sem base" : `${value}%`;
+}
+
+function pedidoEstaAtrasadoAberto(itens){
+  const hoje = normalizeDate(new Date());
+
+  return itens.some(x => !x.entregue && x.dataLimiteOperacionalObj && hoje > x.dataLimiteOperacionalObj);
+}
+
+function pedidoFoiEntregueAtrasado(itens){
+  return itens.length > 0 &&
+    itens.every(x => x.entregue) &&
+    itens.some(x => !x.entregueNoPrazo);
+}
+
 function calcularRankingFornecedores(base){
-  return Object.values(group(base.filter(x => x.fornecedor), "fornecedor")).map(g => {
+  const grupos = new Map();
+
+  base.filter(x => x.fornecedor).forEach(x => {
+    const chave = String(x.fornecedorCodigo || fornecedorKey(x.fornecedor));
+
+    if(!grupos.has(chave)){
+      grupos.set(chave, {
+        nome:x.fornecedor,
+        codigo:x.fornecedorCodigo,
+        items:[]
+      });
+    }
+
+    grupos.get(chave).items.push(x);
+  });
+
+  return [...grupos.values()].map(g => {
     const pedidos = [...new Set(g.items.map(x => x.pedido).filter(Boolean))];
 
     const valorTotal = g.items.reduce((s,x) => s + x.valor, 0);
     const quantidadeTotal = g.items.reduce((s,x) => s + x.quantidade, 0);
 
-    const entregues = g.items.filter(x => x.entregue);
-    const entreguesNoPrazo = entregues.filter(x => x.entregueNoPrazo).length;
+    const itensPlenos = g.items.filter(x => x.entregue);
+    const itensParciais = g.items.filter(x => x.parcial);
+    const itensEmAberto = g.items.filter(x => x.emAberto);
+    const hoje = normalizeDate(new Date());
+    const itensAvaliados = g.items.filter(x => x.dataLimiteOperacionalObj && x.dataLimiteOperacionalObj <= hoje);
+    const itensPlenosNoPrazo = itensAvaliados.filter(x => x.entregue && x.entregueNoPrazo);
 
-    const performance = entregues.length
-      ? Math.round((entreguesNoPrazo / entregues.length) * 100)
+    const performance = itensAvaliados.length
+      ? Math.round((itensPlenosNoPrazo.length / itensAvaliados.length) * 100)
+      : null;
+
+    const itensAtrasadosAbertos = g.items.filter(x => !x.entregue && x.atraso > 0);
+    const itensEntreguesAtrasados = itensPlenos.filter(x => x.atraso > 0);
+
+    const atrasoMedioAberto = itensAtrasadosAbertos.length
+      ? Math.round(itensAtrasadosAbertos.reduce((s,x) => s + x.atraso, 0) / itensAtrasadosAbertos.length)
       : 0;
 
-    const atrasoMedio = g.items.length
-      ? Math.round(g.items.reduce((s,x) => s + (x.atraso || 0), 0) / g.items.length)
+    const atrasoMedioEntregue = itensEntreguesAtrasados.length
+      ? Math.round(itensEntreguesAtrasados.reduce((s,x) => s + x.atraso, 0) / itensEntreguesAtrasados.length)
       : 0;
+
+    const pedidosAgrupados = Object.values(group(g.items.filter(x => x.pedido), "pedido"));
+    const pedidosAtrasadosAbertos = pedidosAgrupados.filter(p => pedidoEstaAtrasadoAberto(p.items)).length;
+    const pedidosEntreguesAtrasados = pedidosAgrupados.filter(p => pedidoFoiEntregueAtrasado(p.items)).length;
 
     const prazoMedioPagamento = valorTotal > 0
       ? Math.round(g.items.reduce((s,x) => s + ((x.prazoPagamento || 0) * x.valor), 0) / valorTotal)
@@ -2644,20 +2891,28 @@ function calcularRankingFornecedores(base){
 
     const stats = {
       nome:g.nome,
+      codigo:g.codigo,
       itens:g.items,
       linhas:g.items.length,
       pedidosUnicos:pedidos.length,
       valorTotal,
       quantidadeTotal,
-      entregues:entregues.length,
-      entreguesNoPrazo,
+      itensPlenos:itensPlenos.length,
+      itensParciais:itensParciais.length,
+      itensEmAberto:itensEmAberto.length,
+      itensAvaliados:itensAvaliados.length,
+      itensPlenosNoPrazo:itensPlenosNoPrazo.length,
+      pedidosAtrasadosAbertos,
+      pedidosEntreguesAtrasados,
       performance,
-      atrasoMedio,
+      atrasoMedioAberto,
+      atrasoMedioEntregue,
       prazoMedioPagamento,
       compradores
     };
 
-    stats.categoria = classificarFornecedorKraljic(stats);
+    stats.categoria = classificarFornecedor(stats);
+    stats.estrategico = isFornecedorEstrategico(stats.nome);
 
     return stats;
   }).sort((a,b) => b.valorTotal - a.valorTotal);
@@ -2669,7 +2924,7 @@ async function renderFornecedores(){
 
   root.innerHTML = `
     <section class="hero">
-      <h1>Ranking Fornecedores</h1>
+      <h1>Performance de Fornecedores</h1>
       <p>Carregando fornecedores a partir da base geral...</p>
     </section>
   `;
@@ -2678,11 +2933,11 @@ async function renderFornecedores(){
     await ensureGeralData();
     renderFornecedoresView(geralData);
   }catch(error){
-    console.error("Erro Ranking Fornecedores:", error);
+    console.error("Erro Performance de Fornecedores:", error);
 
     root.innerHTML = `
       <section class="hero">
-        <h1>Ranking Fornecedores</h1>
+        <h1>Performance de Fornecedores</h1>
         <p>Erro ao carregar a base de fornecedores. Veja o Console com F12.</p>
       </section>
     `;
@@ -2695,14 +2950,22 @@ function renderFornecedoresView(base){
 
   const anos = anosDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
-  const fornecedores = uniqueOptions(base, "fornecedor");
   const categorias = ["Estratégico", "Alavancável", "Gargalo", "Não crítico"];
+  const ordenacoes = [
+    "Maior valor",
+    "Melhor performance",
+    "Pior performance",
+    "Mais pedidos em atraso",
+    "Mais entregas atrasadas",
+    "Mais itens parciais"
+  ];
 
   root.innerHTML = `
     <section class="hero">
-      <h1>Ranking Fornecedores</h1>
+      <h1>Performance de Fornecedores</h1>
       <p>
-        Classificação estratégica dos fornecedores com base em valor comprado, performance de entrega e fornecedores estratégicos fixos.
+        Acompanhamento do atendimento completo, entregas parciais, pontualidade e carteira atrasada por fornecedor.
+        A performance considera os itens com prazo operacional vencido — previsão inicial mais 7 dias — e mede quantos foram atendidos em plenitude dentro desse prazo.
       </p>
     </section>
 
@@ -2711,8 +2974,9 @@ function renderFornecedoresView(base){
       {type:"select", id:"fornMesInicial", label:"Mês inicial", options:MESES_FILTRO},
       {type:"select", id:"fornMesFinal", label:"Mês final", options:MESES_FILTRO},
       {type:"select", id:"fornComprador", label:"Todos compradores", options:compradores},
-      {type:"select", id:"fornFornecedor", label:"Todos fornecedores", options:fornecedores},
-      {type:"select", id:"fornCategoria", label:"Todas categorias", options:categorias}
+      {type:"text", id:"fornBusca", placeholder:"Buscar fornecedor por nome ou código"},
+      {type:"select", id:"fornCategoria", label:"Todas categorias", options:categorias},
+      {type:"select", id:"fornOrdenacao", label:"Ordenar fornecedores", options:ordenacoes}
     ])}
 
     <div id="fornecedoresContent"></div>
@@ -2721,25 +2985,59 @@ function renderFornecedoresView(base){
   aplicarPeriodoPadrao("forn");
 
   attachFilterEvents(
-    ["fornAno","fornMesInicial","fornMesFinal","fornComprador","fornFornecedor","fornCategoria"],
+    ["fornAno","fornMesInicial","fornMesFinal","fornComprador","fornCategoria","fornOrdenacao"],
     () => renderFornecedoresContent(base)
   );
+
+  const buscaEl = document.getElementById("fornBusca");
+  let buscaTimer = null;
+
+  if(buscaEl){
+    buscaEl.addEventListener("input", () => {
+      clearTimeout(buscaTimer);
+      buscaTimer = setTimeout(() => renderFornecedoresContent(base), 180);
+    });
+  }
 
   renderFornecedoresContent(base);
 }
 
 function filterFornecedoresBase(base){
   const comprador = getFilterValue("fornComprador");
-  const fornecedor = getFilterValue("fornFornecedor");
 
   return base.filter(x => {
-    return passaFiltroAnoPeriodo(x, "forn") &&
-      (!comprador || x.comprador === comprador) &&
-      (!fornecedor || x.fornecedor === fornecedor);
+    return passaFiltroAnoPeriodo(x, "forn", "previsaoInicialObj") &&
+      (!comprador || x.comprador === comprador);
   });
 }
 
-function renderMatrizKraljic(stats){
+function ordenarFornecedores(stats, ordenacao){
+  const lista = [...stats];
+
+  if(ordenacao === "Melhor performance"){
+    return lista.sort((a,b) => (b.performance ?? -1) - (a.performance ?? -1) || b.valorTotal - a.valorTotal);
+  }
+
+  if(ordenacao === "Pior performance"){
+    return lista.sort((a,b) => (a.performance ?? 101) - (b.performance ?? 101) || b.valorTotal - a.valorTotal);
+  }
+
+  if(ordenacao === "Mais pedidos em atraso"){
+    return lista.sort((a,b) => b.pedidosAtrasadosAbertos - a.pedidosAtrasadosAbertos || b.valorTotal - a.valorTotal);
+  }
+
+  if(ordenacao === "Mais entregas atrasadas"){
+    return lista.sort((a,b) => b.pedidosEntreguesAtrasados - a.pedidosEntreguesAtrasados || b.valorTotal - a.valorTotal);
+  }
+
+  if(ordenacao === "Mais itens parciais"){
+    return lista.sort((a,b) => b.itensParciais - a.itensParciais || b.valorTotal - a.valorTotal);
+  }
+
+  return lista.sort((a,b) => b.valorTotal - a.valorTotal);
+}
+
+function renderSegmentacaoFornecedores(stats){
   const categorias = {
     "Estratégico": stats.filter(x => x.categoria === "Estratégico"),
     "Alavancável": stats.filter(x => x.categoria === "Alavancável"),
@@ -2759,7 +3057,7 @@ function renderMatrizKraljic(stats){
         </div>
 
         <div class="supplier-grid">
-          ${lista.slice(0,8).map(x => `
+          ${lista.length ? lista.map(x => `
             <div class="supplier">
               <h3>${esc(x.nome)}</h3>
               <div class="row">
@@ -2768,31 +3066,29 @@ function renderMatrizKraljic(stats){
               </div>
               <div class="row">
                 <span>Performance</span>
-                <b>${x.performance}%</b>
+                <b class="${corPerformanceFornecedor(x.performance)}">${performanceFornecedorText(x.performance)}</b>
               </div>
               <div class="row">
-                <span>Pedidos</span>
-                <b>${x.pedidosUnicos}</b>
+                <span>Itens plenos / parciais</span>
+                <b>${x.itensPlenos} / ${x.itensParciais}</b>
               </div>
-            </div>
-          `).join("")}
-
-          ${lista.length > 8 ? `
-            <div class="supplier">
-              <h3>+ ${lista.length - 8} fornecedor(es)</h3>
               <div class="row">
-                <span>Use a tabela abaixo</span>
-                <b>Detalhe</b>
+                <span>Pedidos atrasados abertos</span>
+                <b>${x.pedidosAtrasadosAbertos}</b>
+              </div>
+              <div class="row">
+                <span>Pedidos entregues atrasados</span>
+                <b>${x.pedidosEntreguesAtrasados}</b>
               </div>
             </div>
-          ` : ""}
+          `).join("") : `<div class="empty-state">Nenhum fornecedor nesta categoria.</div>`}
         </div>
       </div>
     `;
   }
 
   return `
-    <section class="matrix" style="margin-bottom:22px;">
+    <section class="matrix supplier-matrix" style="margin-bottom:22px;">
       ${quad("Estratégico", categorias["Estratégico"], "estrategico", "Fornecedores definidos como estratégicos para a operação.")}
       ${quad("Alavancável", categorias["Alavancável"], "alavancavel", "Boa performance e alto valor comprado. Espaço para negociação.")}
       ${quad("Gargalo", categorias["Gargalo"], "gargalo", "Baixa performance ou maior risco de fornecimento. Exige atenção.")}
@@ -2804,12 +3100,20 @@ function renderMatrizKraljic(stats){
 function renderFornecedoresContent(base){
   const dataBase = filterFornecedoresBase(base);
   const categoriaFiltro = getFilterValue("fornCategoria");
+  const busca = norm(getFilterValue("fornBusca"));
+  const ordenacao = getFilterValue("fornOrdenacao") || "Maior valor";
 
   let stats = calcularRankingFornecedores(dataBase);
+
+  if(busca){
+    stats = stats.filter(x => norm(`${x.codigo} ${x.nome}`).includes(busca));
+  }
 
   if(categoriaFiltro){
     stats = stats.filter(x => x.categoria === categoriaFiltro);
   }
+
+  stats = ordenarFornecedores(stats, ordenacao);
 
   const totalValor = stats.reduce((s,x) => s + x.valorTotal, 0);
   const totalFornecedores = stats.length;
@@ -2818,16 +3122,30 @@ function renderFornecedoresContent(base){
   const gargalos = stats.filter(x => x.categoria === "Gargalo").length;
   const naoCriticos = stats.filter(x => x.categoria === "Não crítico").length;
 
-  const performanceMedia = stats.length
-    ? Math.round(stats.reduce((s,x) => s + x.performance, 0) / stats.length)
-    : 0;
+  const totalItensAvaliados = stats.reduce((s,x) => s + x.itensAvaliados, 0);
+  const totalItensNoPrazo = stats.reduce((s,x) => s + x.itensPlenosNoPrazo, 0);
+  const performanceMedia = totalItensAvaliados
+    ? Math.round((totalItensNoPrazo / totalItensAvaliados) * 100)
+    : null;
+
+  const totalItensPlenos = stats.reduce((s,x) => s + x.itensPlenos, 0);
+  const totalItensParciais = stats.reduce((s,x) => s + x.itensParciais, 0);
+  const totalPedidosAtrasados = stats.reduce((s,x) => s + x.pedidosAtrasadosAbertos, 0);
+  const totalPedidosEntreguesAtrasados = stats.reduce((s,x) => s + x.pedidosEntreguesAtrasados, 0);
 
   const topValor = [...stats].sort((a,b) => b.valorTotal - a.valorTotal).slice(0,10);
 
-  const topRisco = [...stats].sort((a,b) => {
-    if(a.performance !== b.performance) return a.performance - b.performance;
-    return b.valorTotal - a.valorTotal;
-  }).slice(0,10);
+  const topRisco = stats.filter(x =>
+    x.pedidosAtrasadosAbertos > 0 ||
+    x.itensParciais > 0 ||
+    x.pedidosEntreguesAtrasados > 0 ||
+    (x.performance !== null && x.performance < 100)
+  ).sort((a,b) =>
+    b.pedidosAtrasadosAbertos - a.pedidosAtrasadosAbertos ||
+    b.itensParciais - a.itensParciais ||
+    (a.performance ?? 101) - (b.performance ?? 101) ||
+    b.valorTotal - a.valorTotal
+  ).slice(0,10);
 
   const content = document.getElementById("fornecedoresContent");
   if(!content) return;
@@ -2836,14 +3154,27 @@ function renderFornecedoresContent(base){
     <section class="kpis">
       ${kpi("Fornecedores analisados", totalFornecedores, "blue")}
       ${kpi("Valor analisado", money(totalValor), "blue")}
-      ${kpi("Performance média", `${performanceMedia}%`, corPerformanceFornecedor(performanceMedia))}
-      ${kpi("Estratégicos", estrategicos, "red")}
-      ${kpi("Alavancáveis", alavancaveis, "green")}
-      ${kpi("Gargalos", gargalos, "orange")}
-      ${kpi("Não críticos", naoCriticos, "blue")}
+      ${kpi("Performance completa no prazo", performanceFornecedorText(performanceMedia), corPerformanceFornecedor(performanceMedia))}
+      ${kpi("Itens plenos", totalItensPlenos, "green")}
+      ${kpi("Itens parciais", totalItensParciais, "yellow")}
+      ${kpi("Pedidos atrasados em aberto", totalPedidosAtrasados, "red")}
+      ${kpi("Pedidos entregues atrasados", totalPedidosEntreguesAtrasados, "orange")}
     </section>
 
-    ${renderMatrizKraljic(stats)}
+    <div class="section-heading">
+      <div>
+        <h2>Segmentação de fornecedores</h2>
+        <p>Todos os fornecedores aparecem nos quadros. Use a busca e os filtros acima para localizar um fornecedor diretamente.</p>
+      </div>
+      <div class="segment-summary">
+        <span>Estratégicos: <b>${estrategicos}</b></span>
+        <span>Alavancáveis: <b>${alavancaveis}</b></span>
+        <span>Gargalos: <b>${gargalos}</b></span>
+        <span>Não críticos: <b>${naoCriticos}</b></span>
+      </div>
+    </div>
+
+    ${renderSegmentacaoFornecedores(stats)}
 
     <section class="panel-grid">
       <div class="panel">
@@ -2856,12 +3187,13 @@ function renderFornecedoresContent(base){
       <div class="panel">
         <h2>Fornecedores com maior atenção</h2>
         ${topRisco.length ? topRisco.map(x => {
-          return barLine(`${x.nome} • ${x.performance}%`, 100 - x.performance, "bar-orange", `${x.performance}%`, 100);
+          const texto = `${x.pedidosAtrasadosAbertos} pedido(s) aberto(s) em atraso`;
+          return barLine(x.nome, x.pedidosAtrasadosAbertos, "bar-orange", texto, topRisco[0]?.pedidosAtrasadosAbertos || 1);
         }).join("") : `<div class="empty-state">Sem fornecedores para os filtros selecionados.</div>`}
       </div>
     </section>
 
-    <section class="table-wrap">
+    <section class="table-wrap supplier-table">
       <table>
         <thead>
           <tr>
@@ -2869,10 +3201,14 @@ function renderFornecedoresContent(base){
             <th>Categoria</th>
             <th>Valor comprado</th>
             <th>Pedidos</th>
-            <th>Linhas</th>
             <th>Performance</th>
-            <th>Entregues</th>
-            <th>Atraso médio</th>
+            <th>Itens plenos</th>
+            <th>Itens parciais</th>
+            <th>Itens em aberto</th>
+            <th>Pedidos atrasados abertos</th>
+            <th>Pedidos entregues atrasados</th>
+            <th>Atraso médio aberto</th>
+            <th>Atraso médio entregue</th>
             <th>Prazo médio pgto</th>
             <th>Compradores</th>
           </tr>
@@ -2885,10 +3221,14 @@ function renderFornecedoresContent(base){
               <td><span class="badge ${categoriaFornecedorClass(x.categoria)}">${esc(x.categoria)}</span></td>
               <td>${money(x.valorTotal)}</td>
               <td>${x.pedidosUnicos}</td>
-              <td>${x.linhas}</td>
-              <td><b class="${corPerformanceFornecedor(x.performance)}">${x.performance}%</b></td>
-              <td>${x.entreguesNoPrazo}/${x.entregues}</td>
-              <td>${x.atrasoMedio} dias</td>
+              <td><b class="${corPerformanceFornecedor(x.performance)}">${performanceFornecedorText(x.performance)}</b></td>
+              <td>${x.itensPlenos}</td>
+              <td>${x.itensParciais}</td>
+              <td>${x.itensEmAberto}</td>
+              <td><b class="${x.pedidosAtrasadosAbertos ? "red" : "green"}">${x.pedidosAtrasadosAbertos}</b></td>
+              <td>${x.pedidosEntreguesAtrasados}</td>
+              <td>${x.atrasoMedioAberto} dias</td>
+              <td>${x.atrasoMedioEntregue} dias</td>
               <td>${x.prazoMedioPagamento} dias</td>
               <td>${esc(x.compradores.join(", ") || "—")}</td>
             </tr>
@@ -4038,6 +4378,8 @@ function acaoMenuPorTexto(texto){
 
   if(
     t === "fornecedores" ||
+    t === "performance de fornecedores" ||
+    t.includes("performance de fornecedor") ||
     t === "ranking fornecedor" ||
     t === "ranking fornecedores" ||
     t.includes("ranking fornecedor") ||
@@ -4133,6 +4475,7 @@ function exporFuncoesGlobais(){
   window.limparPontoInflacao = limparPontoInflacao;
 
   window.aplicarFiltroGeralFaixa = aplicarFiltroGeralFaixa;
+  window.aplicarFiltroGeralAtendimento = aplicarFiltroGeralAtendimento;
   window.aplicarFiltroGeralMes = aplicarFiltroGeralMes;
   window.limparFiltrosGeral = limparFiltrosGeral;
 
