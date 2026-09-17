@@ -194,6 +194,21 @@ function money(value){
   });
 }
 
+function moneyCompact(value){
+  const numero = Number(value || 0);
+
+  if(Math.abs(numero) < 1000000){
+    return money(numero);
+  }
+
+  return new Intl.NumberFormat("pt-BR", {
+    style:"currency",
+    currency:"BRL",
+    notation:"compact",
+    maximumFractionDigits:1
+  }).format(numero);
+}
+
 function moneyKg(value){
   if(value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
   return `${money(value)}/kg`;
@@ -503,20 +518,57 @@ function attachFilterEvents(ids, callback){
   });
 }
 
-function renderFilterBar(config){
+function renderFilterControl(item){
+  const size = ["compact","medium","wide"].includes(item.size) ? item.size : "medium";
+  const label = item.label || item.placeholder || "Filtro";
+
+  if(item.type === "text"){
+    return `
+      <label class="filter-field ${size}">
+        <span>${esc(label)}</span>
+        <input
+          id="${item.id}"
+          aria-label="${esc(label)}"
+          placeholder="${esc(item.placeholder || "")}"
+          value="${esc(item.value || "")}"
+        >
+      </label>
+    `;
+  }
+
+  return `
+    <label class="filter-field ${size}">
+      <span>${esc(label)}</span>
+      <select id="${item.id}" aria-label="${esc(label)}">
+        ${optionList(item.options || [], item.label || "Selecione")}
+      </select>
+    </label>
+  `;
+}
+
+function renderFilterBar(config, options = {}){
+  const principais = config.filter(item => !item.advanced);
+  const avancados = config.filter(item => item.advanced);
+  const clearAction = options.clearAction || "";
+
   return `
     <section class="filters">
-      ${config.map(item => {
-        if(item.type === "text"){
-          return `<input id="${item.id}" placeholder="${esc(item.placeholder || "")}" value="${esc(item.value || "")}">`;
-        }
+      <div class="filters-primary">
+        ${principais.map(renderFilterControl).join("")}
+      </div>
 
-        return `
-          <select id="${item.id}">
-            ${optionList(item.options || [], item.label || "Selecione")}
-          </select>
-        `;
-      }).join("")}
+      ${avancados.length ? `
+        <details class="filters-more">
+          <summary>Mais filtros <b>${avancados.length}</b></summary>
+          <div class="filters-advanced">
+            ${avancados.map(renderFilterControl).join("")}
+          </div>
+        </details>
+      ` : ""}
+
+      ${clearAction ? `
+        <button type="button" class="filters-clear" onclick="${clearAction}">Limpar</button>
+      ` : ""}
     </section>
   `;
 }
@@ -526,12 +578,36 @@ function renderFilterBar(config){
 ========================= */
 
 function kpi(label, value, color = "blue", action = ""){
-  const clickable = action ? `onclick="${action}" style="cursor:pointer"` : "";
+  const clickable = action ? `onclick="${action}" role="button" tabindex="0"` : "";
 
   return `
-    <div class="kpi" ${clickable}>
+    <div class="kpi ${action ? "is-clickable" : ""}" ${clickable}>
       <small>${esc(label)}</small>
       <strong class="${color}">${value}</strong>
+    </div>
+  `;
+}
+
+function executiveKpi(label, value, color = "blue", action = "", meta = "", title = ""){
+  const clickable = action ? `onclick="${action}" role="button" tabindex="0"` : "";
+  const tooltip = title ? `title="${esc(title)}"` : "";
+
+  return `
+    <div class="executive-kpi ${color} ${action ? "is-clickable" : ""}" ${clickable} ${tooltip}>
+      <div class="executive-kpi-label"><i></i>${esc(label)}</div>
+      <strong>${value}</strong>
+      ${meta ? `<span>${esc(meta)}</span>` : ""}
+    </div>
+  `;
+}
+
+function compactStat(label, value, color = "blue", action = ""){
+  const clickable = action ? `onclick="${action}" role="button" tabindex="0"` : "";
+
+  return `
+    <div class="compact-stat ${action ? "is-clickable" : ""}" ${clickable}>
+      <span>${esc(label)}</span>
+      <b class="${color}">${value}</b>
     </div>
   `;
 }
@@ -2216,20 +2292,23 @@ function renderGeralView(base){
 
   root.innerHTML = `
     <section class="hero">
-      <h1>Dashboard Geral</h1>
-      <p>Indicadores calculados automaticamente a partir do CSV bruto, com visão anual, histórica e por período.</p>
+      <div>
+        <span class="hero-kicker">Visão executiva</span>
+        <h1>Dashboard Geral</h1>
+        <p>Leitura rápida da carteira, dos riscos de entrega e do volume comprado.</p>
+      </div>
     </section>
 
     ${renderFilterBar([
-      {type:"select", id:"geralAno", label:"Ano", options:anos},
-      {type:"select", id:"geralMesInicial", label:"Mês inicial", options:MESES_FILTRO},
-      {type:"select", id:"geralMesFinal", label:"Mês final", options:MESES_FILTRO},
-      {type:"select", id:"geralComprador", label:"Todos compradores", options:compradores},
-      {type:"select", id:"geralFornecedor", label:"Todos fornecedores", options:fornecedores},
-      {type:"text", id:"geralPedido", placeholder:"Buscar por número do pedido"},
-      {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas},
-      {type:"select", id:"geralAtendimento", label:"Todos status de atendimento", options:statusAtendimento}
-    ])}
+      {type:"select", id:"geralAno", label:"Ano", options:anos, size:"compact"},
+      {type:"select", id:"geralMesInicial", label:"Mês inicial", options:MESES_FILTRO, size:"medium"},
+      {type:"select", id:"geralMesFinal", label:"Mês final", options:MESES_FILTRO, size:"medium"},
+      {type:"select", id:"geralComprador", label:"Todos compradores", options:compradores, size:"medium"},
+      {type:"select", id:"geralFornecedor", label:"Todos fornecedores", options:fornecedores, size:"wide"},
+      {type:"text", id:"geralPedido", label:"Pedido", placeholder:"Buscar número do pedido", size:"wide"},
+      {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas, size:"wide", advanced:true},
+      {type:"select", id:"geralAtendimento", label:"Todos status de atendimento", options:statusAtendimento, size:"wide", advanced:true}
+    ], {clearAction:"limparFiltrosGeral()"})}
 
     <div id="geralContent"></div>
   `;
@@ -2392,18 +2471,42 @@ function renderGeralContent(base){
   const maxMes = Math.max(...recebidosPorMes.map(x => x.valor), 1);
 
   content.innerHTML = `
-    <section class="kpis">
-      ${kpi("Registros filtrados", data.length, "blue", "limparFiltrosGeral()")}
-      ${kpi("Atrasados", atrasados, "red", "aplicarFiltroGeralFaixa('Atrasado')")}
-      ${kpi("Crítico", criticos, "orange", "aplicarFiltroGeralFaixa('Crítico')")}
-      ${kpi("Alerta", alerta, "yellow", "aplicarFiltroGeralFaixa('Alerta')")}
-      ${kpi("Dentro do prazo", dentro, "green", "aplicarFiltroGeralFaixa('Dentro do prazo')")}
-      ${kpi("Atendidos em plenitude", entregues, "green", "aplicarFiltroGeralAtendimento('Atendido em plenitude')")}
-      ${kpi("Atendidos parcialmente", parciais, "yellow", "aplicarFiltroGeralAtendimento('Atendido parcial')")}
-      ${kpi("Totalmente em aberto", emAberto, "orange", "aplicarFiltroGeralAtendimento('Em aberto')")}
-      ${kpi("Total comprado", money(totalComprado), "blue")}
-      ${kpi("Prazo médio", `${prazoMedioPonderado} dias`, "blue")}
-      ${kpi("Entregas plenas no prazo", `${perfEntrega}%`, corPerformanceFornecedor(perfEntrega))}
+    <section class="executive-kpis">
+      ${executiveKpi("Performance no prazo", `${perfEntrega}%`, corPerformanceFornecedor(perfEntrega), "", "entregas plenas concluídas")}
+      ${executiveKpi("Atrasados", atrasados, "red", "aplicarFiltroGeralFaixa('Atrasado')", "fora do prazo")}
+      ${executiveKpi("Atendidos parcialmente", parciais, "yellow", "aplicarFiltroGeralAtendimento('Atendido parcial')", "itens com saldo")}
+      ${executiveKpi("Totalmente em aberto", emAberto, "orange", "aplicarFiltroGeralAtendimento('Em aberto')", "sem atendimento")}
+      ${executiveKpi("Total comprado", moneyCompact(totalComprado), "blue", "", "no período filtrado", money(totalComprado))}
+    </section>
+
+    <section class="operational-strip">
+      <div class="strip-block strip-risk">
+        <div class="strip-heading">
+          <div>
+            <span>Carteira em aberto</span>
+            <small>Distribuição por faixa de risco</small>
+          </div>
+        </div>
+        <div class="compact-stats">
+          ${compactStat("Crítico", criticos, "orange", "aplicarFiltroGeralFaixa('Crítico')")}
+          ${compactStat("Alerta", alerta, "yellow", "aplicarFiltroGeralFaixa('Alerta')")}
+          ${compactStat("Dentro do prazo", dentro, "green", "aplicarFiltroGeralFaixa('Dentro do prazo')")}
+        </div>
+      </div>
+
+      <div class="strip-block strip-context">
+        <div class="strip-heading">
+          <div>
+            <span>Contexto</span>
+            <small>Volume e condição comercial</small>
+          </div>
+        </div>
+        <div class="compact-stats">
+          ${compactStat("Registros", data.length, "blue", "limparFiltrosGeral()")}
+          ${compactStat("Atendidos plenamente", entregues, "green", "aplicarFiltroGeralAtendimento('Atendido em plenitude')")}
+          ${compactStat("Prazo médio", `${prazoMedioPonderado} dias`, "blue")}
+        </div>
+      </div>
     </section>
 
     <section class="panel-grid">
@@ -2962,22 +3065,23 @@ function renderFornecedoresView(base){
 
   root.innerHTML = `
     <section class="hero">
-      <h1>Performance de Fornecedores</h1>
-      <p>
-        Acompanhamento do atendimento completo, entregas parciais, pontualidade e carteira atrasada por fornecedor.
-        A performance considera os itens com prazo operacional vencido — previsão inicial mais 7 dias — e mede quantos foram atendidos em plenitude dentro desse prazo.
-      </p>
+      <div>
+        <span class="hero-kicker">Gestão de fornecimento</span>
+        <h1>Performance de Fornecedores</h1>
+        <p>Atendimento completo, entregas parciais, pontualidade e carteira atrasada por fornecedor.</p>
+      </div>
+      <div class="hero-note">Prazo operacional: previsão inicial + 7 dias</div>
     </section>
 
     ${renderFilterBar([
-      {type:"select", id:"fornAno", label:"Ano", options:anos},
-      {type:"select", id:"fornMesInicial", label:"Mês inicial", options:MESES_FILTRO},
-      {type:"select", id:"fornMesFinal", label:"Mês final", options:MESES_FILTRO},
-      {type:"select", id:"fornComprador", label:"Todos compradores", options:compradores},
-      {type:"text", id:"fornBusca", placeholder:"Buscar fornecedor por nome ou código"},
-      {type:"select", id:"fornCategoria", label:"Todas categorias", options:categorias},
-      {type:"select", id:"fornOrdenacao", label:"Ordenar fornecedores", options:ordenacoes}
-    ])}
+      {type:"select", id:"fornAno", label:"Ano", options:anos, size:"compact"},
+      {type:"select", id:"fornMesInicial", label:"Mês inicial", options:MESES_FILTRO, size:"medium"},
+      {type:"select", id:"fornMesFinal", label:"Mês final", options:MESES_FILTRO, size:"medium"},
+      {type:"select", id:"fornComprador", label:"Todos compradores", options:compradores, size:"medium"},
+      {type:"text", id:"fornBusca", label:"Fornecedor", placeholder:"Buscar nome ou código", size:"wide"},
+      {type:"select", id:"fornCategoria", label:"Todas categorias", options:categorias, size:"wide", advanced:true},
+      {type:"select", id:"fornOrdenacao", label:"Ordenar fornecedores", options:ordenacoes, size:"wide", advanced:true}
+    ], {clearAction:"limparFiltrosFornecedores()"})}
 
     <div id="fornecedoresContent"></div>
   `;
@@ -3011,6 +3115,21 @@ function filterFornecedoresBase(base){
   });
 }
 
+function aplicarFiltroFornecedorCategoria(categoria){
+  setFilterAndTrigger("fornCategoria", categoria);
+}
+
+function limparFiltrosFornecedores(){
+  setFilterValue("fornAno", ANO_PADRAO);
+  setFilterValue("fornMesInicial", "");
+  setFilterValue("fornMesFinal", "");
+  setFilterValue("fornComprador", "");
+  setFilterValue("fornBusca", "");
+  setFilterValue("fornCategoria", "");
+  setFilterValue("fornOrdenacao", "");
+  triggerFilter("fornAno");
+}
+
 function ordenarFornecedores(stats, ordenacao){
   const lista = [...stats];
 
@@ -3037,7 +3156,7 @@ function ordenarFornecedores(stats, ordenacao){
   return lista.sort((a,b) => b.valorTotal - a.valorTotal);
 }
 
-function renderSegmentacaoFornecedores(stats){
+function renderSegmentacaoFornecedores(stats, categoriaAtiva = ""){
   const categorias = {
     "Estratégico": stats.filter(x => x.categoria === "Estratégico"),
     "Alavancável": stats.filter(x => x.categoria === "Alavancável"),
@@ -3045,54 +3164,30 @@ function renderSegmentacaoFornecedores(stats){
     "Não crítico": stats.filter(x => x.categoria === "Não crítico")
   };
 
-  function quad(titulo, lista, classe, descricao){
+  function categoriaCard(titulo, lista, classe, descricao){
     const valor = lista.reduce((s,x) => s + x.valorTotal, 0);
+    const ativa = categoriaAtiva === titulo;
 
     return `
-      <div class="quad ${classe}">
-        <h2>${esc(titulo)}</h2>
-        <div class="quad-meta">
-          ${esc(descricao)}<br>
-          <b>${lista.length}</b> fornecedor(es) • <b>${money(valor)}</b>
-        </div>
-
-        <div class="supplier-grid">
-          ${lista.length ? lista.map(x => `
-            <div class="supplier">
-              <h3>${esc(x.nome)}</h3>
-              <div class="row">
-                <span>Valor</span>
-                <b>${money(x.valorTotal)}</b>
-              </div>
-              <div class="row">
-                <span>Performance</span>
-                <b class="${corPerformanceFornecedor(x.performance)}">${performanceFornecedorText(x.performance)}</b>
-              </div>
-              <div class="row">
-                <span>Itens plenos / parciais</span>
-                <b>${x.itensPlenos} / ${x.itensParciais}</b>
-              </div>
-              <div class="row">
-                <span>Pedidos atrasados abertos</span>
-                <b>${x.pedidosAtrasadosAbertos}</b>
-              </div>
-              <div class="row">
-                <span>Pedidos entregues atrasados</span>
-                <b>${x.pedidosEntreguesAtrasados}</b>
-              </div>
-            </div>
-          `).join("") : `<div class="empty-state">Nenhum fornecedor nesta categoria.</div>`}
-        </div>
-      </div>
+      <button
+        type="button"
+        class="segment-card ${classe} ${ativa ? "active" : ""}"
+        onclick="aplicarFiltroFornecedorCategoria('${jsArg(ativa ? "" : titulo)}')"
+      >
+        <span class="segment-card-label">${esc(titulo)}</span>
+        <strong>${lista.length}</strong>
+        <span class="segment-card-value">${moneyCompact(valor)}</span>
+        <small>${esc(descricao)}</small>
+      </button>
     `;
   }
 
   return `
-    <section class="matrix supplier-matrix" style="margin-bottom:22px;">
-      ${quad("Estratégico", categorias["Estratégico"], "estrategico", "Fornecedores definidos como estratégicos para a operação.")}
-      ${quad("Alavancável", categorias["Alavancável"], "alavancavel", "Boa performance e alto valor comprado. Espaço para negociação.")}
-      ${quad("Gargalo", categorias["Gargalo"], "gargalo", "Baixa performance ou maior risco de fornecimento. Exige atenção.")}
-      ${quad("Não crítico", categorias["Não crítico"], "nao-critico", "Menor impacto ou baixo volume de pedidos.")}
+    <section class="segment-cards" aria-label="Categorias de fornecedores">
+      ${categoriaCard("Estratégico", categorias["Estratégico"], "estrategico", "Essenciais para a operação")}
+      ${categoriaCard("Alavancável", categorias["Alavancável"], "alavancavel", "Potencial de negociação")}
+      ${categoriaCard("Gargalo", categorias["Gargalo"], "gargalo", "Risco que exige atenção")}
+      ${categoriaCard("Não crítico", categorias["Não crítico"], "nao-critico", "Menor impacto ou volume")}
     </section>
   `;
 }
@@ -3103,11 +3198,13 @@ function renderFornecedoresContent(base){
   const busca = norm(getFilterValue("fornBusca"));
   const ordenacao = getFilterValue("fornOrdenacao") || "Maior valor";
 
-  let stats = calcularRankingFornecedores(dataBase);
+  let statsBase = calcularRankingFornecedores(dataBase);
 
   if(busca){
-    stats = stats.filter(x => norm(`${x.codigo} ${x.nome}`).includes(busca));
+    statsBase = statsBase.filter(x => norm(`${x.codigo} ${x.nome}`).includes(busca));
   }
+
+  let stats = [...statsBase];
 
   if(categoriaFiltro){
     stats = stats.filter(x => x.categoria === categoriaFiltro);
@@ -3117,10 +3214,6 @@ function renderFornecedoresContent(base){
 
   const totalValor = stats.reduce((s,x) => s + x.valorTotal, 0);
   const totalFornecedores = stats.length;
-  const estrategicos = stats.filter(x => x.categoria === "Estratégico").length;
-  const alavancaveis = stats.filter(x => x.categoria === "Alavancável").length;
-  const gargalos = stats.filter(x => x.categoria === "Gargalo").length;
-  const naoCriticos = stats.filter(x => x.categoria === "Não crítico").length;
 
   const totalItensAvaliados = stats.reduce((s,x) => s + x.itensAvaliados, 0);
   const totalItensNoPrazo = stats.reduce((s,x) => s + x.itensPlenosNoPrazo, 0);
@@ -3151,30 +3244,28 @@ function renderFornecedoresContent(base){
   if(!content) return;
 
   content.innerHTML = `
-    <section class="kpis">
-      ${kpi("Fornecedores analisados", totalFornecedores, "blue")}
-      ${kpi("Valor analisado", money(totalValor), "blue")}
-      ${kpi("Performance completa no prazo", performanceFornecedorText(performanceMedia), corPerformanceFornecedor(performanceMedia))}
-      ${kpi("Itens plenos", totalItensPlenos, "green")}
-      ${kpi("Itens parciais", totalItensParciais, "yellow")}
-      ${kpi("Pedidos atrasados em aberto", totalPedidosAtrasados, "red")}
-      ${kpi("Pedidos entregues atrasados", totalPedidosEntreguesAtrasados, "orange")}
+    <section class="executive-kpis">
+      ${executiveKpi("Performance no prazo", performanceFornecedorText(performanceMedia), corPerformanceFornecedor(performanceMedia), "", "atendimento completo")}
+      ${executiveKpi("Atrasados em aberto", totalPedidosAtrasados, "red", "", "pedidos ainda pendentes")}
+      ${executiveKpi("Entregues com atraso", totalPedidosEntreguesAtrasados, "orange", "", "pedidos já concluídos")}
+      ${executiveKpi("Itens parciais", totalItensParciais, "yellow", "", "com saldo em aberto")}
+      ${executiveKpi("Valor analisado", moneyCompact(totalValor), "blue", "", "no período filtrado", money(totalValor))}
+    </section>
+
+    <section class="supplier-meta-strip">
+      ${compactStat("Fornecedores analisados", totalFornecedores, "blue")}
+      ${compactStat("Itens plenos", totalItensPlenos, "green")}
+      ${compactStat("Itens avaliados", totalItensAvaliados, "blue")}
     </section>
 
     <div class="section-heading">
       <div>
         <h2>Segmentação de fornecedores</h2>
-        <p>Todos os fornecedores aparecem nos quadros. Use a busca e os filtros acima para localizar um fornecedor diretamente.</p>
-      </div>
-      <div class="segment-summary">
-        <span>Estratégicos: <b>${estrategicos}</b></span>
-        <span>Alavancáveis: <b>${alavancaveis}</b></span>
-        <span>Gargalos: <b>${gargalos}</b></span>
-        <span>Não críticos: <b>${naoCriticos}</b></span>
+        <p>Selecione uma categoria para filtrar a lista completa. Clique novamente para exibir todas.</p>
       </div>
     </div>
 
-    ${renderSegmentacaoFornecedores(stats)}
+    ${renderSegmentacaoFornecedores(statsBase, categoriaFiltro)}
 
     <section class="panel-grid">
       <div class="panel">
@@ -3192,6 +3283,13 @@ function renderFornecedoresContent(base){
         }).join("") : `<div class="empty-state">Sem fornecedores para os filtros selecionados.</div>`}
       </div>
     </section>
+
+    <div class="section-heading table-heading">
+      <div>
+        <h2>Lista completa de fornecedores</h2>
+        <p>${totalFornecedores} fornecedor(es) conforme os filtros selecionados.</p>
+      </div>
+    </div>
 
     <section class="table-wrap supplier-table">
       <table>

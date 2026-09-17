@@ -4,19 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Portal Performance de Compras — Linshalm</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20260917-executivo" />
 </head>
 
 <body>
   <header class="topbar">
-    <img src="logo-linshalm.png" alt="Linshalm" class="logo" />
+    <div class="topbar-inner">
+      <img src="logo-linshalm.png" alt="Linshalm" class="logo" />
 
-    <nav class="menu">
-      <button class="nav-btn active" data-page="geral">Dashboard Geral</button>
-      <button class="nav-btn" data-page="fornecedores">Performance de Fornecedores</button>
-      <button class="nav-btn" data-page="saving">Ranking Saving</button>
-      <button class="nav-btn danger-btn" onclick="gerarRelatorioAtencao()">Imprimir pedidos em atenção</button>
-    </nav>
+      <nav class="menu" aria-label="Navegação principal">
+        <button type="button" class="nav-btn active" data-page="geral">Dashboard</button>
+        <button type="button" class="nav-btn" data-page="fornecedores">Fornecedores</button>
+        <button type="button" class="nav-btn" data-page="saving">Saving</button>
+        <button
+          type="button"
+          class="nav-btn danger-btn"
+          onclick="gerarRelatorioAtencao()"
+          title="Gerar relatório de pedidos em atenção"
+        >Pedidos em atenção</button>
+      </nav>
+    </div>
   </header>
 
   <main id="app"></main>
@@ -25,6 +32,6 @@
     Desenvolvido por Gibson C Ribeiro
   </footer>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260917-executivo"></script>
 </body>
 </html>
