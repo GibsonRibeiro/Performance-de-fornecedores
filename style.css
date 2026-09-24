@@ -1355,7 +1355,7 @@ tr:hover{
 .supplier-chip{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#22151a;color:#f5c8c8;border:1px solid #593037;border-radius:7px;padding:7px 9px;font-size:10px;cursor:pointer}
 .supplier-chip b{margin-left:5px;font-size:13px}
 .filter-hint{color:#788699;font-size:11px;margin-bottom:13px;line-height:1.4}
-.strip-context .compact-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
+.strip-context .compact-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
 .strip-context .compact-stat span{white-space:normal;min-height:22px}
 .strip-context .compact-stat b{font-size:15px}
 .leadtime-note{color:#94a3b8;font-size:11px;line-height:1.5;margin:-3px 0 14px}

@@ -243,6 +243,7 @@ function parseDateBR(text){
   if(/^\d{4}-\d{2}-\d{2}/.test(raw)){
     const [year, month, day] = raw.slice(0,10).split("-").map(Number);
     const date = new Date(year, month - 1, day);
+    if(date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
     date.setHours(0,0,0,0);
     return date;
   }
@@ -259,6 +260,7 @@ function parseDateBR(text){
   if(!day || !month || !year) return null;
 
   const date = new Date(year, month - 1, day);
+  if(date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
   date.setHours(0,0,0,0);
 
   return date;
@@ -2768,12 +2770,13 @@ function renderGeralContent(base){
   const parciais = data.filter(x => x.parcial).length;
   const emAberto = data.filter(x => x.emAberto).length;
 
-  const leadTimePrevisto = calcularLeadTimePonderado(data, "leadTimePrevisto");
-  const leadTimeRealizado = calcularLeadTimePonderado(data, "leadTimeRealizado");
-  const leadTimePrevistoComparavel = calcularLeadTimePonderado(
-    data.filter(x => x.entregue && Number.isFinite(x.leadTimeRealizado) && x.leadTimeRealizado >= 0),
-    "leadTimePrevisto"
-  );
+  const leadTimePrevistoCarteira = calcularLeadTimePonderado(data, "leadTimePrevisto");
+  // A comparação usa exatamente as mesmas linhas, com as duas datas coerentes.
+  const entregasComparaveis = data.filter(x => x.entregue && x.quantidade > 0 &&
+    Number.isFinite(x.leadTimePrevisto) && x.leadTimePrevisto >= 0 &&
+    Number.isFinite(x.leadTimeRealizado) && x.leadTimeRealizado >= 0);
+  const leadTimePrevistoEntregues = calcularLeadTimePonderado(entregasComparaveis, "leadTimePrevisto");
+  const leadTimeRealizadoEntregues = calcularLeadTimePonderado(entregasComparaveis, "leadTimeRealizado");
   const totalPaginas = Math.max(1, Math.ceil(data.length / GERAL_POR_PAGINA));
   geralPagina = Math.min(Math.max(1, geralPagina), totalPaginas);
   const primeiraLinha = (geralPagina - 1) * GERAL_POR_PAGINA;
@@ -2871,13 +2874,14 @@ function renderGeralContent(base){
           ${compactStat("Registros", data.length, "blue", "limparFiltrosGeral()")}
           ${compactStat("Atendidos plenamente", entregues, "green", "aplicarFiltroGeralAtendimento('Atendido em plenitude')")}
           ${compactStat("Pgto. médio", `${prazoMedioPonderado} d`, "blue")}
-          <div class="compact-stat" title="Da data do pedido à previsão inicial, ponderado pela quantidade comprada (${leadTimePrevisto.linhas} linhas válidas). Não é o prazo homologado."><span>LT previsto ponderado</span><b class="blue">${leadTimeTexto(leadTimePrevisto)}</b></div>
-          <div class="compact-stat" title="Da data do pedido ao último recebimento de itens atendidos em plenitude, ponderado pela quantidade comprada (${leadTimeRealizado.linhas} linhas válidas)."><span>LT realizado ponderado</span><b class="green">${leadTimeTexto(leadTimeRealizado)}</b></div>
+          <div class="compact-stat" title="Da data do pedido à previsão inicial, todos os itens com previsão válida (${leadTimePrevistoCarteira.linhas} linhas), incluindo pedidos em aberto. Ponderado pela quantidade comprada; não é o prazo homologado."><span>LT previsto · carteira geral</span><b class="blue">${leadTimeTexto(leadTimePrevistoCarteira)}</b></div>
+          <div class="compact-stat" title="Da data do pedido à previsão inicial, somente os mesmos itens plenamente entregues com ambas as datas válidas (${leadTimePrevistoEntregues.linhas} linhas). Ponderado pela quantidade comprada."><span>LT previsto · entregues</span><b class="blue">${leadTimeTexto(leadTimePrevistoEntregues)}</b></div>
+          <div class="compact-stat" title="Da data do pedido ao último recebimento, nos mesmos itens usados no LT previsto de entregues (${leadTimeRealizadoEntregues.linhas} linhas). Ponderado pela quantidade comprada."><span>LT realizado · entregues</span><b class="green">${leadTimeTexto(leadTimeRealizadoEntregues)}</b></div>
         </div>
       </div>
     </section>
 
-    <div class="leadtime-note">Lead time em dias corridos. Previsto = previsão inicial − data do pedido (todos os itens); realizado = último recebimento − data do pedido (somente itens concluídos). As duas médias dos cards têm bases diferentes.${leadTimePrevistoComparavel.dias !== null && leadTimeRealizado.dias !== null ? ` Nos mesmos itens concluídos: previsto ${leadTimeTexto(leadTimePrevistoComparavel)}, realizado ${leadTimeTexto(leadTimeRealizado)} (${(leadTimeRealizado.dias - leadTimePrevistoComparavel.dias) >= 0 ? "+" : ""}${(leadTimeRealizado.dias - leadTimePrevistoComparavel.dias).toLocaleString("pt-BR",{maximumFractionDigits:1})} d).` : ""} Médias ponderadas pela quantidade comprada, aplicadas aos filtros. ${data.length && new Set(data.map(x => x.produto)).size > 1 ? "Há mais de um código no resultado: filtre um item antes de copiar uma referência para o cadastro." : "Confirme com Compras o prazo preferencial e a homologação antes de cadastrar."}</div>
+    <div class="leadtime-note">Lead time em dias corridos: data do pedido até a previsão inicial ou o último recebimento. Carteira geral inclui itens em aberto; os dois cards de entregues usam as mesmas ${entregasComparaveis.length} linhas com datas válidas.${leadTimePrevistoEntregues.dias !== null && leadTimeRealizadoEntregues.dias !== null ? ` Diferença realizado − previsto: ${(leadTimeRealizadoEntregues.dias - leadTimePrevistoEntregues.dias) >= 0 ? "+" : ""}${(leadTimeRealizadoEntregues.dias - leadTimePrevistoEntregues.dias).toLocaleString("pt-BR",{maximumFractionDigits:1})} d.` : ""} Médias ponderadas pela quantidade comprada, aplicadas aos filtros. ${data.length && new Set(data.map(x => x.produto)).size > 1 ? "Há mais de um código no resultado: filtre um item antes de copiar uma referência para o cadastro." : "Confirme com Compras o prazo preferencial e a homologação antes de cadastrar."}</div>
     ${renderPrazosPorFornecedor(data)}
 
     <section class="panel-grid">
