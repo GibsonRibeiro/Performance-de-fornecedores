@@ -1358,6 +1358,12 @@ tr:hover{
 .strip-context .compact-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
 .strip-context .compact-stat span{white-space:normal;min-height:22px}
 .strip-context .compact-stat b{font-size:15px}
+.strip-risk{flex-direction:column;align-items:stretch;justify-content:space-between;gap:12px}
+.strip-risk .strip-heading{min-width:0;padding:0 0 9px;border-right:0;border-bottom:1px solid #202938}
+.strip-risk .compact-stats{flex:0 0 auto;gap:8px}
+.strip-risk .compact-stat{min-height:57px;padding:9px 12px;background:#141a23;border:1px solid #202938}
+.strip-risk .compact-stat span{font-size:10px;white-space:normal}
+.strip-risk .compact-stat b{font-size:20px}
 .leadtime-note{color:#94a3b8;font-size:11px;line-height:1.5;margin:-3px 0 14px}
 .leadtime-panel{margin-bottom:14px}
 .leadtime-panel p{font-size:11px;color:#94a3b8;margin:-4px 0 10px}
