@@ -47,6 +47,8 @@ function getSupabaseClient(){
 const ANO_PADRAO = "2026";
 const ANOS_HISTORICO = ["2026", "2025", "2024", "2023"];
 const OPCAO_TODOS_ANOS = "Todos os anos";
+const META_SAVING_2026 = 0.05;
+const PESO_ENTREGAS_COMPRADOR = 0.90;
 
 const MESES_FILTRO = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -1263,6 +1265,7 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 
     const quantidadeAtendida = numberBR(quantidadeAtendidaRaw);
     const quantidadeSaldo = numberBR(quantidadeSaldoRaw);
+    const quantidadeCancelada = numberBR(get(r, ["Quantidade Compra Canc.", "Quantidade Compra Cancelada"]));
     const temControleAtendimento = String(quantidadeAtendidaRaw).trim() !== "" ||
       String(quantidadeSaldoRaw).trim() !== "";
 
@@ -1459,6 +1462,7 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 
       quantidade,
       quantidadeAtendida,
+      quantidadeCancelada,
       quantidadeSaldo,
       temControleAtendimento,
       quantidadeOriginal:quantidade,
@@ -2290,6 +2294,11 @@ async function renderGeral(){
     await ensureGeralData();
     await ensureIndicesData();
     renderGeralView(geralData);
+    statusSavingsPerformance = "carregando";
+    savingsPerformancePromise = carregarSavingsPerformance();
+    savingsPerformancePromise.then(() => {
+      if(document.getElementById("geralContent")) renderGeralContent(geralData);
+    });
   }catch(error){
     console.error("Erro Dashboard Geral:", error);
 
@@ -2316,6 +2325,133 @@ function calcularLeadTimePonderado(linhas, campo){
 
 function leadTimeTexto(resultado){
   return resultado.dias === null ? "—" : `${resultado.dias.toLocaleString("pt-BR", {maximumFractionDigits:1})} d`;
+}
+
+/* Nota por item vencido. A última entrega mede a conclusão; sem quantidade por
+   recebimento, datas intermediárias identificam entregas mistas, não seu volume. */
+function notaEntregaLinha(x, hoje = normalizeDate(new Date())){
+  const limite = x.dataLimiteOperacionalObj;
+  if(!limite || limite > hoje) return {tipo:"futuro"};
+  const quantidadeEfetiva = x.quantidade - (x.quantidadeCancelada || 0);
+  if(!(quantidadeEfetiva > 0)) return {tipo:"excluido"};
+  const datas = x.datasRecebimento || [];
+  if(datas.some(d => x.dataCadastroObj && d < x.dataCadastroObj)) return {tipo:"excluido"};
+  const fracao = Math.min(1, Math.max(0, x.quantidadeAtendida / quantidadeEfetiva));
+  const completo = x.quantidadeSaldo <= 0 && fracao >= 0.999;
+  if(completo && !x.dataRecebimentoObj) return {tipo:"excluido"};
+  const termino = completo ? x.dataRecebimentoObj : hoje;
+  const atraso = Math.max(0, diffDays(termino, limite) || 0);
+  const misto = datas.some(d => d <= limite) && datas.some(d => d > limite);
+  return {
+    tipo:completo ? (atraso ? "completoAtraso" : "completoPrazo")
+      : (fracao ? "parcial" : "aberto"),
+    misto, atraso, fracao,
+    pontos:100 * fracao / (1 + atraso / 30),
+    valor:Math.max(0, x.valor || 0)
+  };
+}
+
+function resumirNotaEntrega(linhas){
+  const tipos = {completoPrazo:0, completoAtraso:0, parcial:0, aberto:0, misto:0, futuro:0, excluido:0};
+  let soma = 0, somaPonderada = 0, valor = 0, validos = 0;
+  linhas.forEach(x => {
+    const r = notaEntregaLinha(x);
+    tipos[r.tipo]++;
+    if(r.misto) tipos.misto++;
+    if(r.pontos === undefined) return;
+    validos++;
+    soma += r.pontos;
+    somaPonderada += r.pontos * r.valor;
+    valor += r.valor;
+  });
+  return {
+    tipos, validos,
+    nota:validos ? 0.7 * (soma / validos) + 0.3 * (valor ? somaPonderada / valor : soma / validos) : null
+  };
+}
+
+function baseNotaCompleta(){
+  return geralData.some(x => x.anoBase === ANO_PADRAO && x.itemPedido);
+}
+
+function detalheNotaEntrega(r){
+  const c = r.tipos;
+  return `${r.validos} itens avaliados · ${c.completoPrazo} completos no prazo · ` +
+    `${c.completoAtraso} completos com atraso · ${c.parcial} parciais · ` +
+    `${c.aberto} sem entrega · ${c.misto} com recebimentos antes e depois do prazo · ` +
+    `${c.futuro} ainda não vencidos · ${c.excluido} sem dados válidos para a nota.`;
+}
+
+let savingsPerformance = [];
+let statusSavingsPerformance = "carregando";
+let savingsPerformancePromise = null;
+
+async function carregarSavingsPerformance(){
+  try{
+    const client = getSavingClient();
+    if(client){
+      const {data, error} = await client.from(SAVING_TABLE).select("*");
+      if(error) throw error;
+      savingsPerformance = (data || []).map(dbToSaving);
+    }else{
+      const rows = await loadCSV(FILES.saving, false);
+      savingsPerformance = rows.map(r => ({
+        categoria:"Saving", tipo:get(r,["Tipo"]), data:get(r,["Data"]),
+        comprador:get(r,["Comprador"]), status:get(r,["Status"]),
+        quantidade:get(r,["Consumo Mensal"]), precoAtual:get(r,["Preco Atual Unitario", "Preço Atual Unitario"]),
+        competidorA:get(r,["Vencedor"]), precoCompetidorA:get(r,["Preco Vencedor", "Preço Vencedor"])
+      }));
+    }
+    statusSavingsPerformance = "disponivel";
+  }catch(error){
+    console.warn("Saving indisponível para a nota integrada:", error);
+    statusSavingsPerformance = "indisponivel";
+  }
+}
+
+function chaveCompradorNota(nome){
+  return norm(nome).split(/\s+/)[0];
+}
+
+function notaSavingComprador(nome, ano, carteiraCompleta){
+  if(ano !== "2026" || statusSavingsPerformance !== "disponivel") return null;
+  const hoje = normalizeDate(new Date());
+  const fim = new Date(Math.min(+hoje, +new Date(2026,11,31)));
+  const inicio = new Date(fim.getFullYear() - 1, fim.getMonth(), fim.getDate() + 1);
+  const comprador = chaveCompradorNota(nome);
+  const valorCarteira = carteiraCompleta.filter(x =>
+    chaveCompradorNota(x.comprador) === comprador &&
+    x.dataCadastroObj >= inicio && x.dataCadastroObj <= fim
+  ).reduce((s,x) => s + Math.max(0,x.valor), 0);
+  if(!valorCarteira) return null;
+  const homologados = savingsPerformance.filter(x => {
+    const data = parseDateBR(x.data);
+    return norm(x.categoria) === "saving" && norm(x.status) === "homologado" &&
+      chaveCompradorNota(x.comprador) === comprador && data && data.getFullYear() === 2026;
+  });
+  const projetado = homologados.reduce((s,x) => s + calcularSavingRegistro(x).savingTotal, 0);
+  const taxa = projetado / valorCarteira;
+  return {projetado, valorCarteira, taxa, quantidade:homologados.length,
+    pontos:Math.max(0, Math.min(10, 10 * taxa / META_SAVING_2026))};
+}
+
+function barraNota(nome, resumo, saving = undefined){
+  const entrega = resumo.nota;
+  const pontosEntrega = entrega === null ? null : entrega * PESO_ENTREGAS_COMPRADOR;
+  const total = saving === undefined ? entrega : saving && pontosEntrega !== null
+    ? pontosEntrega + saving.pontos : null;
+  const texto = total === null ? "—" : `${total.toLocaleString("pt-BR", {maximumFractionDigits:1})} / 100`;
+  const explicacaoSaving = saving === undefined ? "" : saving
+    ? `<p>Entregas: ${pontosEntrega.toFixed(1).replace(".",",")} / 90 · Saving anualizado homologado: ${saving.pontos.toFixed(1).replace(".",",")} / 10.</p>
+       <p>Saving projetado ${moneySV(saving.projetado)} / carteira em 12 meses ${moneySV(saving.valorCarteira)} = ${(saving.taxa*100).toLocaleString("pt-BR",{maximumFractionDigits:2})}% · meta 2026: 5% · ${saving.quantidade} negociação(ões).</p>`
+    : `<p>Entregas: ${pontosEntrega === null ? "—" : pontosEntrega.toFixed(1).replace(".",",")} / 90 · Saving sem base comparável ou indisponível; nota combinada não calculada.</p>`;
+  return `<details class="performance-detail"><summary>
+    <span class="performance-name">${esc(nome)}</span>
+    <span class="performance-track"><span style="width:${total === null ? 0 : total}%"></span></span>
+    <b>${texto}</b></summary>
+    <div class="performance-explain">${explicacaoSaving}<p>${esc(detalheNotaEntrega(resumo))}</p>
+    <small>Prazo: previsão inicial + 7 dias. Entrega: 70% por item e 30% por valor; dias de atraso reduzem progressivamente a nota. Cancelamentos integrais e datas incoerentes são excluídos.</small></div>
+  </details>`;
 }
 
 function chaveFornecedor(x){
@@ -2459,6 +2595,7 @@ function renderGeralView(base){
       <div id="geralFornecedorChips" class="supplier-chips" aria-live="polite"></div>
     </div>
     <div class="filter-hint">Combine código, descrição e fornecedores. PN, TAUS e observações são pesquisáveis quando constarem da exportação. Para consultar o histórico completo, selecione “Todos os anos”.</div>
+    ${baseNotaCompleta() ? "" : '<div class="score-warning">Notas preliminares: o geral.csv atual não traz o número do item nem cancelamentos. Substitua pela exportação completa para a análise definitiva.</div>'}
     <div id="geralContent"></div>
   `;
 
@@ -2611,12 +2748,9 @@ function renderGeralContent(base){
     ? Math.round(data.reduce((sum, x) => sum + (x.valor * x.prazoPagamento), 0) / totalComprado)
     : 0;
 
-  const entreguesData = data.filter(x => x.entregue);
-  const entreguesNoPrazo = entreguesData.filter(x => x.entregueNoPrazo).length;
-
-  const perfEntrega = entreguesData.length
-    ? Math.round((entreguesNoPrazo / entreguesData.length) * 100)
-    : 0;
+  const resumoEntrega = resumirNotaEntrega(data);
+  const perfEntrega = resumoEntrega.validos
+    ? Math.round(resumoEntrega.tipos.completoPrazo / resumoEntrega.validos * 100) : null;
 
   const porComprador = group(data, "comprador");
 
@@ -2627,15 +2761,18 @@ function renderGeralContent(base){
     ["Dentro do prazo", dentro, "bar-green"]
   ];
 
+  const anoNota = getFilterValue("geralAno") || ANO_PADRAO;
+  const baseAnoNota = anoNota === OPCAO_TODOS_ANOS ? geralData
+    : geralData.filter(x => x.anoBase === anoNota);
   const performanceComprador = Object.values(porComprador).map(g => {
-    const entregues = g.items.filter(x => x.entregue);
-    const ok = entregues.filter(x => x.entregueNoPrazo).length;
-
-    return {
-      nome: g.nome,
-      perf: entregues.length ? Math.round((ok / entregues.length) * 100) : 0
-    };
-  }).sort((a,b) => b.perf - a.perf);
+    const carteira = baseAnoNota.filter(x => x.comprador === g.nome);
+    const resumo = resumirNotaEntrega(carteira);
+    const saving = anoNota === "2026"
+      ? notaSavingComprador(g.nome, anoNota, geralData) : undefined;
+    return {nome:g.nome, resumo, saving,
+      nota:saving === undefined ? resumo.nota
+        : saving && resumo.nota !== null ? resumo.nota * 0.9 + saving.pontos : null};
+  }).sort((a,b) => (b.nota ?? -1) - (a.nota ?? -1));
 
   const topFornecedores = Object.values(group(data, "fornecedor"))
     .map(g => ({
@@ -2664,7 +2801,7 @@ function renderGeralContent(base){
 
   content.innerHTML = `
     <section class="executive-kpis">
-      ${executiveKpi("Performance no prazo", `${perfEntrega}%`, corPerformanceFornecedor(perfEntrega), "", "entregas plenas concluídas")}
+      ${executiveKpi("Completos no prazo", perfEntrega === null ? "—" : `${perfEntrega}%`, corPerformanceFornecedor(perfEntrega), "", "itens vencidos e avaliáveis")}
       ${executiveKpi("Atrasados", atrasados, "red", "aplicarFiltroGeralFaixa('Atrasado')", "fora do prazo")}
       ${executiveKpi("Atendidos parcialmente", parciais, "yellow", "aplicarFiltroGeralAtendimento('Atendido parcial')", "itens com saldo")}
       ${executiveKpi("Totalmente em aberto", emAberto, "orange", "aplicarFiltroGeralAtendimento('Em aberto')", "sem atendimento")}
@@ -2714,8 +2851,9 @@ function renderGeralContent(base){
 
       <div class="panel">
         <h2>Performance por comprador</h2>
+        <p class="score-caption">${anoNota === "2026" ? "Nota anual da carteira · entregas 90 pontos + Saving homologado 10 pontos." : "Nota da carteira no período selecionado · apenas entregas; meta de Saving definida para 2026."} Clique para entender. Filtros de item e fornecedor não alteram a nota anual do comprador.</p>
         ${performanceComprador.length ? performanceComprador.map(x => {
-          return barLine(x.nome, x.perf, "bar-blue", `${x.perf}%`, 100);
+          return barraNota(x.nome, x.resumo, x.saving);
         }).join("") : `<div class="empty-state">Sem dados de entrega para o período.</div>`}
       </div>
 
@@ -3130,7 +3268,7 @@ function corPerformanceFornecedor(value){
 }
 
 function performanceFornecedorText(value){
-  return value === null || value === undefined ? "Sem base" : `${value}%`;
+  return value === null || value === undefined ? "Sem base" : `${value.toLocaleString("pt-BR", {maximumFractionDigits:1})} / 100`;
 }
 
 function pedidoEstaAtrasadoAberto(itens){
@@ -3171,13 +3309,8 @@ function calcularRankingFornecedores(base){
     const itensPlenos = g.items.filter(x => x.entregue);
     const itensParciais = g.items.filter(x => x.parcial);
     const itensEmAberto = g.items.filter(x => x.emAberto);
-    const hoje = normalizeDate(new Date());
-    const itensAvaliados = g.items.filter(x => x.dataLimiteOperacionalObj && x.dataLimiteOperacionalObj <= hoje);
-    const itensPlenosNoPrazo = itensAvaliados.filter(x => x.entregue && x.entregueNoPrazo);
-
-    const performance = itensAvaliados.length
-      ? Math.round((itensPlenosNoPrazo.length / itensAvaliados.length) * 100)
-      : null;
+    const resumoNota = resumirNotaEntrega(g.items);
+    const performance = resumoNota.nota;
 
     const itensAtrasadosAbertos = g.items.filter(x => !x.entregue && x.atraso > 0);
     const itensEntreguesAtrasados = itensPlenos.filter(x => x.atraso > 0);
@@ -3211,8 +3344,9 @@ function calcularRankingFornecedores(base){
       itensPlenos:itensPlenos.length,
       itensParciais:itensParciais.length,
       itensEmAberto:itensEmAberto.length,
-      itensAvaliados:itensAvaliados.length,
-      itensPlenosNoPrazo:itensPlenosNoPrazo.length,
+      itensAvaliados:resumoNota.validos,
+      itensPlenosNoPrazo:resumoNota.tipos.completoPrazo,
+      resumoNota,
       pedidosAtrasadosAbertos,
       pedidosEntreguesAtrasados,
       performance,
@@ -3291,6 +3425,7 @@ function renderFornecedoresView(base){
       {type:"select", id:"fornOrdenacao", label:"Ordenar fornecedores", options:ordenacoes, size:"wide", advanced:true}
     ], {clearAction:"limparFiltrosFornecedores()"})}
 
+    ${baseNotaCompleta() ? "" : '<div class="score-warning">Notas preliminares até a substituição do geral.csv pela exportação completa.</div>'}
     <div id="fornecedoresContent"></div>
   `;
 
@@ -3424,10 +3559,7 @@ function renderFornecedoresContent(base){
   const totalFornecedores = stats.length;
 
   const totalItensAvaliados = stats.reduce((s,x) => s + x.itensAvaliados, 0);
-  const totalItensNoPrazo = stats.reduce((s,x) => s + x.itensPlenosNoPrazo, 0);
-  const performanceMedia = totalItensAvaliados
-    ? Math.round((totalItensNoPrazo / totalItensAvaliados) * 100)
-    : null;
+  const performanceMedia = resumirNotaEntrega(stats.flatMap(x => x.itens)).nota;
 
   const totalItensPlenos = stats.reduce((s,x) => s + x.itensPlenos, 0);
   const totalItensParciais = stats.reduce((s,x) => s + x.itensParciais, 0);
@@ -3453,7 +3585,7 @@ function renderFornecedoresContent(base){
 
   content.innerHTML = `
     <section class="executive-kpis">
-      ${executiveKpi("Performance no prazo", performanceFornecedorText(performanceMedia), corPerformanceFornecedor(performanceMedia), "", "atendimento completo")}
+      ${executiveKpi("Nota das entregas", performanceFornecedorText(performanceMedia), corPerformanceFornecedor(performanceMedia), "", "prazo + quantidade + atraso")}
       ${executiveKpi("Atrasados em aberto", totalPedidosAtrasados, "red", "", "pedidos ainda pendentes")}
       ${executiveKpi("Entregues com atraso", totalPedidosEntreguesAtrasados, "orange", "", "pedidos já concluídos")}
       ${executiveKpi("Itens parciais", totalItensParciais, "yellow", "", "com saldo em aberto")}
@@ -3465,6 +3597,7 @@ function renderFornecedoresContent(base){
       ${compactStat("Itens plenos", totalItensPlenos, "green")}
       ${compactStat("Itens avaliados", totalItensAvaliados, "blue")}
     </section>
+    <p class="score-caption">Nota de 0 a 100: itens com prazo inicial + 7 dias já vencido; 70% por item e 30% por valor. Clique na nota de cada fornecedor para ver a composição.</p>
 
     <div class="section-heading">
       <div>
@@ -3527,7 +3660,7 @@ function renderFornecedoresContent(base){
               <td><span class="badge ${categoriaFornecedorClass(x.categoria)}">${esc(x.categoria)}</span></td>
               <td>${money(x.valorTotal)}</td>
               <td>${x.pedidosUnicos}</td>
-              <td><b class="${corPerformanceFornecedor(x.performance)}">${performanceFornecedorText(x.performance)}</b></td>
+              <td><details class="supplier-score-detail"><summary class="${corPerformanceFornecedor(x.performance)}">${performanceFornecedorText(x.performance)}</summary><p>${esc(detalheNotaEntrega(x.resumoNota))}</p></details></td>
               <td>${x.itensPlenos}</td>
               <td>${x.itensParciais}</td>
               <td>${x.itensEmAberto}</td>
