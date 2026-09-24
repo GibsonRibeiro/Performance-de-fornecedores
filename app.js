@@ -3660,7 +3660,7 @@ function renderFornecedoresContent(base){
               <td><span class="badge ${categoriaFornecedorClass(x.categoria)}">${esc(x.categoria)}</span></td>
               <td>${money(x.valorTotal)}</td>
               <td>${x.pedidosUnicos}</td>
-              <td><details class="supplier-score-detail"><summary class="${corPerformanceFornecedor(x.performance)}">${performanceFornecedorText(x.performance)}</summary><p>${esc(detalheNotaEntrega(x.resumoNota))}</p></details></td>
+              <td><details class="supplier-score-detail"><summary class="${corPerformanceFornecedor(x.performance)}" title="${x.itensAvaliados} itens avaliados"><span>${performanceFornecedorText(x.performance)}</span><span class="supplier-score-track"><span style="width:${x.performance ?? 0}%"></span></span></summary><p>${esc(detalheNotaEntrega(x.resumoNota))}</p></details></td>
               <td>${x.itensPlenos}</td>
               <td>${x.itensParciais}</td>
               <td>${x.itensEmAberto}</td>
