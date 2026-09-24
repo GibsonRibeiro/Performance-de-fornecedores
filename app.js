@@ -143,6 +143,10 @@ const TIPOS_SAVING = [
 ========================= */
 
 let geralData = [];
+let geralFornecedoresSelecionados = new Set();
+let geralFornecedorOpcoes = [];
+let geralPagina = 1;
+const GERAL_POR_PAGINA = 100;
 let savingData = [];
 let indicesData = [];
 let pesosPerfisData = [];
@@ -1293,6 +1297,9 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
     ]);
 
     const previsaoInicialObj = parseDateBR(previsaoInicial);
+    const dataCadastroObj = parseDateBR(get(r, ["Data Cadastro", "Data do Pedido", "Data Pedido"]));
+    const leadTimePrevisto = diffDays(previsaoInicialObj, dataCadastroObj);
+    const leadTimeRealizado = diffDays(dataRecebimentoObj, dataCadastroObj);
     const dataLimiteOperacionalObj = addDays(previsaoInicialObj, 7);
 
     const condicaoPagamento = String(get(r, [
@@ -1334,6 +1341,16 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       "Produto Descrição",
       "Produto Descricao"
     ]);
+    const observacaoProduto = get(r, [
+      "Observação Produto", "Observacao Produto", "Observação Item",
+      "Observacao Item", "Observação", "Obs. Item"
+    ]);
+    const referenciaProdutoFornecedor = [
+      get(r, ["Código Produto Fornecedor", "Codigo Produto Fornecedor",
+        "Referência Fornecedor", "Referencia Fornecedor"]),
+      get(r, ["PN", "Part Number", "P/N"]),
+      get(r, ["TAUS"])
+    ].filter(Boolean).join(" · ");
 
     const fornecedor = get(r, [
       "Descrição Fornecedor",
@@ -1427,6 +1444,8 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
       itemPedido,
       produto,
       descricaoProduto,
+      observacaoProduto,
+      referenciaProdutoFornecedor,
       fornecedor,
       fornecedorCodigo,
       comprador,
@@ -1470,6 +1489,9 @@ function mapGeralRows(rows, anoBase = ANO_PADRAO){
 
       previsaoInicial,
       previsaoInicialObj,
+      dataCadastroObj,
+      leadTimePrevisto,
+      leadTimeRealizado,
       dataLimiteOperacionalObj
     };
   }).filter(x => x.fornecedor || x.pedido);
@@ -2280,13 +2302,122 @@ async function renderGeral(){
   }
 }
 
+// O CSV não contém o prazo homologado: usamos a previsão inicial do pedido.
+function calcularLeadTimePonderado(linhas, campo){
+  const validas = linhas.filter(x => x.quantidade > 0 &&
+    Number.isFinite(x[campo]) && x[campo] >= 0 &&
+    (campo !== "leadTimeRealizado" || x.entregue));
+  const peso = validas.reduce((s, x) => s + x.quantidade, 0);
+  return {
+    dias:peso ? validas.reduce((s,x) => s + x[campo] * x.quantidade, 0) / peso : null,
+    linhas:validas.length
+  };
+}
+
+function leadTimeTexto(resultado){
+  return resultado.dias === null ? "—" : `${resultado.dias.toLocaleString("pt-BR", {maximumFractionDigits:1})} d`;
+}
+
+function chaveFornecedor(x){
+  return String(x.fornecedorCodigo || `nome:${x.fornecedor}`).trim();
+}
+
+function renderFornecedorChoices(){
+  const list = document.getElementById("geralFornecedorChoices");
+  const input = document.getElementById("geralFornecedorBusca");
+  if(!list || !input) return;
+  const termos = norm(input.value).split(/\s+/).filter(Boolean);
+  const encontrados = geralFornecedorOpcoes.filter(x =>
+    termos.every(t => norm(`${x.codigo} ${x.nome}`).includes(t)));
+  const visiveis = encontrados.slice(0, 80);
+  list.innerHTML = visiveis.map(x => `
+    <label class="supplier-option">
+      <input type="checkbox" value="${esc(x.chave)}" ${geralFornecedoresSelecionados.has(x.chave) ? "checked" : ""}>
+      <span class="supplier-option-name">${esc(x.nome)}</span>
+      <small>${esc(x.codigo)}</small>
+    </label>`).join("") || '<div class="supplier-empty">Nenhum fornecedor encontrado.</div>';
+  const counter = document.getElementById("geralFornecedorCount");
+  if(counter) counter.textContent = encontrados.length > 80
+    ? `Mostrando 80 de ${encontrados.length}. Continue digitando.`
+    : `${encontrados.length} fornecedor${encontrados.length === 1 ? "" : "es"}`;
+}
+
+function atualizarFornecedorSelecionado(renderizarLista = true){
+  const count = geralFornecedoresSelecionados.size;
+  const trigger = document.getElementById("geralFornecedorTrigger");
+  if(trigger) trigger.textContent = count ? `${count} fornecedor${count === 1 ? "" : "es"} selecionado${count === 1 ? "" : "s"} ▾` : "Todos os fornecedores ▾";
+  const chips = document.getElementById("geralFornecedorChips");
+  if(chips) chips.innerHTML = geralFornecedorOpcoes.filter(x => geralFornecedoresSelecionados.has(x.chave))
+    .map(x => `<button type="button" class="supplier-chip" data-remove="${esc(x.chave)}" title="Remover ${esc(x.nome)}">${esc(x.nome)} <b aria-hidden="true">×</b></button>`).join("");
+  if(renderizarLista) renderFornecedorChoices();
+}
+
+let geralFiltroAbort = new AbortController();
+
+function configurarFiltroFornecedores(base){
+  const opcoes = new Map();
+  base.forEach(x => {
+    if(x.fornecedor){
+      const chave = chaveFornecedor(x);
+      if(!opcoes.has(chave)) opcoes.set(chave, {chave, nome:x.fornecedor, codigo:x.fornecedorCodigo || "Sem código"});
+    }
+  });
+  geralFornecedorOpcoes = [...opcoes.values()].sort((a,b) => a.nome.localeCompare(b.nome,"pt-BR"));
+  const trigger = document.getElementById("geralFornecedorTrigger");
+  const painel = document.getElementById("geralFornecedorPanel");
+  trigger.addEventListener("click", () => {
+    painel.hidden = !painel.hidden;
+    trigger.setAttribute("aria-expanded", String(!painel.hidden));
+    if(!painel.hidden) document.getElementById("geralFornecedorBusca").focus();
+  });
+  document.getElementById("geralFornecedorBusca").addEventListener("input", renderFornecedorChoices);
+  document.getElementById("geralFornecedorChoices").addEventListener("change", e => {
+    if(e.target.matches('input[type="checkbox"]')){
+      if(e.target.checked) geralFornecedoresSelecionados.add(e.target.value);
+      else geralFornecedoresSelecionados.delete(e.target.value);
+      atualizarFornecedorSelecionado(false);
+      geralPagina = 1;
+      renderGeralContent(base);
+    }
+  });
+  document.getElementById("geralFornecedorChips").addEventListener("click", e => {
+    const chip = e.target.closest("[data-remove]");
+    if(!chip) return;
+    geralFornecedoresSelecionados.delete(chip.dataset.remove);
+    atualizarFornecedorSelecionado();
+    geralPagina = 1;
+    renderGeralContent(base);
+  });
+  document.getElementById("geralFornecedorClear").addEventListener("click", () => {
+    geralFornecedoresSelecionados.clear();
+    atualizarFornecedorSelecionado();
+    geralPagina = 1;
+    renderGeralContent(base);
+  });
+  painel.addEventListener("keydown", e => {
+    if(e.key === "Escape"){
+      painel.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.focus();
+    }
+  });
+  document.addEventListener("click", e => {
+    if(painel.isConnected && !e.target.closest("#geralFornecedorPicker")){
+      painel.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    }
+  }, {signal:geralFiltroAbort.signal});
+  atualizarFornecedorSelecionado();
+}
+
 function renderGeralView(base){
   const root = ensureAppElement();
   if(!root) return;
+  geralFiltroAbort.abort();
+  geralFiltroAbort = new AbortController();
 
   const anos = anosDisponiveis(base);
   const compradores = uniqueOptions(base, "comprador");
-  const fornecedores = uniqueOptions(base, "fornecedor");
   const faixas = uniqueOptions(base, "faixa");
   const statusAtendimento = ["Atendido em plenitude", "Atendido parcial", "Em aberto"];
 
@@ -2304,59 +2435,86 @@ function renderGeralView(base){
       {type:"select", id:"geralMesInicial", label:"Mês inicial", options:MESES_FILTRO, size:"medium"},
       {type:"select", id:"geralMesFinal", label:"Mês final", options:MESES_FILTRO, size:"medium"},
       {type:"select", id:"geralComprador", label:"Todos compradores", options:compradores, size:"medium"},
-      {type:"select", id:"geralFornecedor", label:"Todos fornecedores", options:fornecedores, size:"wide"},
-      {type:"text", id:"geralPedido", label:"Pedido", placeholder:"Buscar número do pedido", size:"wide"},
+      {type:"text", id:"geralProduto", label:"Código do item", placeholder:"Código exato do item", size:"medium"},
+      {type:"text", id:"geralDescricao", label:"Descrição, PN ou TAUS", placeholder:"Pesquisar descrição, PN ou TAUS", size:"wide"},
+      {type:"text", id:"geralCodigoFornecedor", label:"Código do fornecedor (cadastro)", placeholder:"Código do fornecedor", size:"medium"},
+      {type:"text", id:"geralPedido", label:"Pedido", placeholder:"Número do pedido", size:"medium"},
       {type:"select", id:"geralFaixa", label:"Todas faixas de risco", options:faixas, size:"wide", advanced:true},
       {type:"select", id:"geralAtendimento", label:"Todos status de atendimento", options:statusAtendimento, size:"wide", advanced:true}
     ], {clearAction:"limparFiltrosGeral()"})}
 
+    <div class="supplier-filter-row">
+      <div class="supplier-picker" id="geralFornecedorPicker">
+        <span class="supplier-filter-label">Fornecedores</span>
+        <button type="button" id="geralFornecedorTrigger" aria-haspopup="true" aria-expanded="false" aria-controls="geralFornecedorPanel">Todos os fornecedores ▾</button>
+        <div class="supplier-popover" id="geralFornecedorPanel" hidden>
+          <div class="supplier-popover-head">
+            <input type="search" id="geralFornecedorBusca" aria-label="Pesquisar fornecedores" placeholder="Busque nome ou código">
+            <button type="button" id="geralFornecedorClear">Limpar seleção</button>
+          </div>
+          <div id="geralFornecedorCount" class="supplier-count"></div>
+          <div id="geralFornecedorChoices" class="supplier-choices"></div>
+        </div>
+      </div>
+      <div id="geralFornecedorChips" class="supplier-chips" aria-live="polite"></div>
+    </div>
+    <div class="filter-hint">Combine código, descrição e fornecedores. PN, TAUS e observações são pesquisáveis quando constarem da exportação. Para consultar o histórico completo, selecione “Todos os anos”.</div>
     <div id="geralContent"></div>
   `;
 
   aplicarPeriodoPadrao("geral");
-
-  attachFilterEvents(
-    ["geralAno","geralMesInicial","geralMesFinal","geralComprador","geralFornecedor","geralPedido","geralFaixa","geralAtendimento"],
-    () => {
+  configurarFiltroFornecedores(base);
+  let timer;
+  ["geralAno","geralMesInicial","geralMesFinal","geralComprador","geralProduto","geralDescricao","geralCodigoFornecedor","geralPedido","geralFaixa","geralAtendimento"].forEach(id => {
+    const el = document.getElementById(id);
+    const refresh = () => {
+      clearTimeout(timer);
+      geralPagina = 1;
       inflacaoPontoSelecionado = null;
-      renderGeralContent(base);
-    }
-  );
+      if(el.tagName === "INPUT") timer = setTimeout(() => renderGeralContent(base), 180);
+      else renderGeralContent(base);
+    };
+    el.addEventListener(el.tagName === "INPUT" ? "input" : "change", refresh);
+  });
 
   renderGeralContent(base);
 }
 
-function filterGeral(base){
-  const comprador = getFilterValue("geralComprador");
-  const fornecedor = getFilterValue("geralFornecedor");
-  const pedido = norm(getFilterValue("geralPedido"));
-  const faixa = getFilterValue("geralFaixa");
-  const atendimento = getFilterValue("geralAtendimento");
+function filtrosGeralAtuais(){
+  return {
+    comprador:getFilterValue("geralComprador"),
+    codigoProduto:norm(getFilterValue("geralProduto")),
+    termosDescricao:norm(getFilterValue("geralDescricao")).split(/\s+/).filter(Boolean),
+    fornecedorCodigo:norm(getFilterValue("geralCodigoFornecedor")),
+    pedido:norm(getFilterValue("geralPedido")),
+    faixa:getFilterValue("geralFaixa"),
+    atendimento:getFilterValue("geralAtendimento")
+  };
+}
 
-  return base.filter(x => {
-    return passaFiltroAnoPeriodo(x, "geral") &&
-      (!comprador || x.comprador === comprador) &&
-      (!fornecedor || x.fornecedor === fornecedor) &&
-      (!pedido || norm(x.pedido).includes(pedido)) &&
-      (!faixa || x.faixa === faixa) &&
-      (!atendimento || x.statusAtendimento === atendimento);
-  });
+function passaFiltrosGeralComuns(x, filtros){
+  const {comprador, codigoProduto, termosDescricao, fornecedorCodigo, pedido, faixa, atendimento} = filtros;
+  return (!comprador || x.comprador === comprador) &&
+    (!geralFornecedoresSelecionados.size || geralFornecedoresSelecionados.has(chaveFornecedor(x))) &&
+    (!fornecedorCodigo || norm(x.fornecedorCodigo) === fornecedorCodigo) &&
+    (!codigoProduto || norm(x.produto) === codigoProduto) &&
+    termosDescricao.every(t => norm(`${x.descricaoProduto} ${x.observacaoProduto} ${x.referenciaProdutoFornecedor}`).includes(t)) &&
+    (!pedido || norm(x.pedido).includes(pedido)) &&
+    (!faixa || x.faixa === faixa) &&
+    (!atendimento || x.statusAtendimento === atendimento);
+}
+
+function filterGeral(base){
+  const filtros = filtrosGeralAtuais();
+  return base.filter(x => passaFiltroAnoPeriodo(x, "geral") && passaFiltrosGeralComuns(x, filtros));
 }
 
 function filterGeralComparativaInflacao(base){
-  const comprador = getFilterValue("geralComprador");
-  const fornecedor = getFilterValue("geralFornecedor");
-  const pedido = norm(getFilterValue("geralPedido"));
-  const faixa = getFilterValue("geralFaixa");
-  const atendimento = getFilterValue("geralAtendimento");
+  const filtros = filtrosGeralAtuais();
   const {ini, fim} = getPeriodoMes("geral");
 
   return base.filter(x => {
-    if(comprador && x.comprador !== comprador) return false;
-    if(fornecedor && x.fornecedor !== fornecedor) return false;
-    if(pedido && !norm(x.pedido).includes(pedido)) return false;
-    if(faixa && x.faixa !== faixa) return false;
-    if(atendimento && x.statusAtendimento !== atendimento) return false;
+    if(!passaFiltrosGeralComuns(x, filtros)) return false;
 
     if(ini !== null && fim !== null){
       if(!x.dataRecebimentoObj) return false;
@@ -2367,6 +2525,28 @@ function filterGeralComparativaInflacao(base){
 
     return true;
   });
+}
+
+function renderPrazosPorFornecedor(data){
+  const codigos = [...new Set(data.map(x => x.produto).filter(Boolean))];
+  if(codigos.length !== 1) return "";
+  const grupos = Object.values(group(data, "fornecedor"))
+    .map(g => ({nome:g.nome, codigo:g.items[0].fornecedorCodigo,
+      previsto:calcularLeadTimePonderado(g.items,"leadTimePrevisto"),
+      realizado:calcularLeadTimePonderado(g.items,"leadTimeRealizado")}))
+    .sort((a,b) => b.previsto.linhas - a.previsto.linhas);
+  return `<section class="panel leadtime-panel">
+    <h2>Histórico do item ${esc(codigos[0])} por fornecedor</h2>
+    <p>Referência para o cadastro. Fornecedor com compra no histórico não significa fornecedor homologado.</p>
+    <div class="leadtime-table-wrap"><table><thead><tr><th>Fornecedor</th><th>Código</th><th>Previsto ponderado</th><th>Realizado ponderado</th><th>Pedidos válidos</th></tr></thead>
+    <tbody>${grupos.map(g => `<tr><td>${esc(g.nome)}</td><td>${esc(g.codigo || "—")}</td><td>${leadTimeTexto(g.previsto)}</td><td>${leadTimeTexto(g.realizado)}</td><td>${g.previsto.linhas}</td></tr>`).join("")}</tbody></table></div>
+  </section>`;
+}
+
+function irParaPaginaGeral(pagina){
+  geralPagina = pagina;
+  renderGeralContent(geralData);
+  document.getElementById("geralTabela")?.scrollIntoView({block:"start",behavior:"smooth"});
 }
 
 function aplicarFiltroGeralFaixa(faixa){
@@ -2386,11 +2566,16 @@ function limparFiltrosGeral(){
   setFilterValue("geralMesInicial", "");
   setFilterValue("geralMesFinal", "");
   setFilterValue("geralComprador", "");
-  setFilterValue("geralFornecedor", "");
+  geralFornecedoresSelecionados.clear();
+  atualizarFornecedorSelecionado();
+  setFilterValue("geralProduto", "");
+  setFilterValue("geralDescricao", "");
+  setFilterValue("geralCodigoFornecedor", "");
   setFilterValue("geralPedido", "");
   setFilterValue("geralFaixa", "");
   setFilterValue("geralAtendimento", "");
 
+  geralPagina = 1;
   triggerFilter("geralAno");
 }
 
@@ -2412,6 +2597,13 @@ function renderGeralContent(base){
   const entregues = countFaixa("Entregue");
   const parciais = data.filter(x => x.parcial).length;
   const emAberto = data.filter(x => x.emAberto).length;
+
+  const leadTimePrevisto = calcularLeadTimePonderado(data, "leadTimePrevisto");
+  const leadTimeRealizado = calcularLeadTimePonderado(data, "leadTimeRealizado");
+  const totalPaginas = Math.max(1, Math.ceil(data.length / GERAL_POR_PAGINA));
+  geralPagina = Math.min(Math.max(1, geralPagina), totalPaginas);
+  const primeiraLinha = (geralPagina - 1) * GERAL_POR_PAGINA;
+  const paginaLinhas = data.slice(primeiraLinha, primeiraLinha + GERAL_POR_PAGINA);
 
   const totalComprado = data.reduce((sum, x) => sum + x.valor, 0);
 
@@ -2498,16 +2690,21 @@ function renderGeralContent(base){
         <div class="strip-heading">
           <div>
             <span>Contexto</span>
-            <small>Volume e condição comercial</small>
+            <small>Volume, pagamento e lead time</small>
           </div>
         </div>
         <div class="compact-stats">
           ${compactStat("Registros", data.length, "blue", "limparFiltrosGeral()")}
           ${compactStat("Atendidos plenamente", entregues, "green", "aplicarFiltroGeralAtendimento('Atendido em plenitude')")}
-          ${compactStat("Prazo médio", `${prazoMedioPonderado} dias`, "blue")}
+          ${compactStat("Pgto. médio", `${prazoMedioPonderado} d`, "blue")}
+          <div class="compact-stat" title="Da data do pedido à previsão inicial, ponderado pela quantidade comprada (${leadTimePrevisto.linhas} linhas válidas). Não é o prazo homologado."><span>LT previsto ponderado</span><b class="blue">${leadTimeTexto(leadTimePrevisto)}</b></div>
+          <div class="compact-stat" title="Da data do pedido ao último recebimento de itens atendidos em plenitude, ponderado pela quantidade comprada (${leadTimeRealizado.linhas} linhas válidas)."><span>LT realizado ponderado</span><b class="green">${leadTimeTexto(leadTimeRealizado)}</b></div>
         </div>
       </div>
     </section>
+
+    <div class="leadtime-note">Lead time em dias corridos. Previsto = previsão inicial − data do pedido; realizado = último recebimento − data do pedido (itens atendidos em plenitude). Média ponderada pela quantidade comprada, aplicada aos filtros. ${data.length && new Set(data.map(x => x.produto)).size > 1 ? "Há mais de um código no resultado: filtre um item antes de copiar uma referência para o cadastro." : "Confirme com Compras o prazo preferencial e a homologação antes de cadastrar."}</div>
+    ${renderPrazosPorFornecedor(data)}
 
     <section class="panel-grid">
       <div class="panel">
@@ -2613,7 +2810,15 @@ function renderGeralContent(base){
       <div id="inflacaoContent"></div>
     </section>
 
-    <section class="table-wrap">
+    <section class="table-wrap" id="geralTabela">
+      <div class="table-toolbar">
+        <strong>Itens encontrados: ${data.length.toLocaleString("pt-BR")}</strong>
+        <div class="page-controls">
+          <span>${data.length ? primeiraLinha + 1 : 0}–${Math.min(primeiraLinha + GERAL_POR_PAGINA, data.length)} de ${data.length} · página ${geralPagina}/${totalPaginas}</span>
+          <button type="button" onclick="irParaPaginaGeral(${geralPagina - 1})" ${geralPagina <= 1 ? "disabled" : ""}>Anterior</button>
+          <button type="button" onclick="irParaPaginaGeral(${geralPagina + 1})" ${geralPagina >= totalPaginas ? "disabled" : ""}>Próxima</button>
+        </div>
+      </div>
       <table>
         <thead>
           <tr>
@@ -2621,7 +2826,7 @@ function renderGeralContent(base){
             <th>Item</th>
             <th>Produto</th>
             <th>Descrição Produto</th>
-            <th>Fornecedor</th>
+            <th>Fornecedor / código</th>
             <th>Comprador</th>
             <th>Qtd. comprada</th>
             <th>Qtd. atendida</th>
@@ -2631,6 +2836,8 @@ function renderGeralContent(base){
             <th>Valor</th>
             <th>Condição</th>
             <th>Prazo Pgto</th>
+            <th>LT previsto</th>
+            <th>LT realizado</th>
             <th>Faixa</th>
             <th>Atraso</th>
             <th>Último recebimento</th>
@@ -2639,13 +2846,13 @@ function renderGeralContent(base){
         </thead>
 
         <tbody>
-          ${data.slice(0, 1500).map(x => `
+          ${paginaLinhas.map(x => `
             <tr>
               <td>${esc(x.pedido || "—")}</td>
               <td>${esc(x.itemPedido || "—")}</td>
               <td>${esc(x.produto || "—")}</td>
-              <td>${esc(x.descricaoProduto || "—")}</td>
-              <td><b>${esc(x.fornecedor || "—")}</b></td>
+              <td>${esc(x.descricaoProduto || "—")}${x.observacaoProduto || x.referenciaProdutoFornecedor ? `<small class="cell-code">${esc([x.referenciaProdutoFornecedor,x.observacaoProduto].filter(Boolean).join(" · "))}</small>` : ""}</td>
+              <td><b>${esc(x.fornecedor || "—")}</b><small class="cell-code">${esc(x.fornecedorCodigo || "—")}</small></td>
               <td>${esc(x.comprador || "—")}</td>
               <td>${quantidadeText(x.quantidade, x.unidadeCompra)}</td>
               <td>${quantidadeText(x.quantidadeAtendida, x.unidadeCompra)}</td>
@@ -2655,6 +2862,8 @@ function renderGeralContent(base){
               <td>${money(x.valor)}</td>
               <td>${esc(x.condicaoPagamento || "—")}</td>
               <td>${x.prazoPagamento} dias</td>
+              <td>${Number.isFinite(x.leadTimePrevisto) && x.leadTimePrevisto >= 0 ? `${x.leadTimePrevisto} d` : "—"}</td>
+              <td>${x.entregue && Number.isFinite(x.leadTimeRealizado) && x.leadTimeRealizado >= 0 ? `${x.leadTimeRealizado} d` : "—"}</td>
               <td><span class="badge ${faixaClass(x.faixa)}">${esc(x.faixa || "—")}</span></td>
               <td>${x.atraso}</td>
               <td>${esc(dateTextBR(x.dataRecebimentoObj))}</td>
@@ -2664,11 +2873,6 @@ function renderGeralContent(base){
         </tbody>
       </table>
 
-      ${data.length > 1500 ? `
-        <div style="color:#94a3b8;font-size:12px;padding:12px 14px;">
-          Exibindo as primeiras 1.500 linhas do período filtrado para manter o painel leve.
-        </div>
-      ` : ""}
     </section>
   `;
 
@@ -2682,13 +2886,18 @@ async function gerarRelatorioAtencao(){
   await ensureGeralData();
 
   const comprador = getFilterValue("geralComprador");
-  const fornecedor = getFilterValue("geralFornecedor");
   const pedidoBusca = norm(getFilterValue("geralPedido"));
+  const produtoBusca = getFilterValue("geralProduto");
+  const descricaoBusca = getFilterValue("geralDescricao");
+  const fornecedorCodigoBusca = getFilterValue("geralCodigoFornecedor");
   const faixa = getFilterValue("geralFaixa");
   const atendimento = getFilterValue("geralAtendimento");
   const ano = getFilterValue("geralAno") || ANO_PADRAO;
   const mesInicial = getFilterValue("geralMesInicial");
   const mesFinal = getFilterValue("geralMesFinal");
+  const fornecedoresSelecionados = geralFornecedorOpcoes
+    .filter(x => geralFornecedoresSelecionados.has(x.chave)).map(x => x.nome);
+  const filtros = filtrosGeralAtuais();
 
   const base = geralData.filter(x => {
     const dias = daysUntil(x.previsaoInicialObj);
@@ -2697,11 +2906,7 @@ async function gerarRelatorioAtencao(){
       !x.entregue &&
       dias !== null &&
       dias <= 10 &&
-      (!comprador || x.comprador === comprador) &&
-      (!fornecedor || x.fornecedor === fornecedor) &&
-      (!pedidoBusca || norm(x.pedido).includes(pedidoBusca)) &&
-      (!faixa || x.faixa === faixa) &&
-      (!atendimento || x.statusAtendimento === atendimento);
+      passaFiltrosGeralComuns(x, filtros);
   }).sort((a,b) => {
     const da = daysUntil(a.previsaoInicialObj);
     const db = daysUntil(b.previsaoInicialObj);
@@ -2792,7 +2997,10 @@ async function gerarRelatorioAtencao(){
   <div class="criteria">
     <b>Critério:</b> itens em aberto ou atendidos parcialmente, com <b>Previsão Entrega Inicial</b> já vencida ou vencendo em até 10 dias.
     <br><b>Período da previsão inicial:</b> ${esc(ano)} — ${esc(periodoMes)}
-    ${fornecedor ? `<br><b>Fornecedor filtrado:</b> ${esc(fornecedor)}` : ""}
+    ${fornecedoresSelecionados.length ? `<br><b>Fornecedores:</b> ${esc(fornecedoresSelecionados.join(", "))}` : ""}
+    ${fornecedorCodigoBusca ? `<br><b>Código fornecedor:</b> ${esc(fornecedorCodigoBusca)}` : ""}
+    ${produtoBusca ? `<br><b>Código item:</b> ${esc(produtoBusca)}` : ""}
+    ${descricaoBusca ? `<br><b>Descrição/PN/TAUS:</b> ${esc(descricaoBusca)}` : ""}
     ${pedidoBusca ? `<br><b>Pedido filtrado:</b> ${esc(pedidoBusca)}` : ""}
     ${faixa ? `<br><b>Faixa filtrada:</b> ${esc(faixa)}` : ""}
     ${atendimento ? `<br><b>Status filtrado:</b> ${esc(atendimento)}` : ""}
@@ -4576,6 +4784,7 @@ function exporFuncoesGlobais(){
   window.aplicarFiltroGeralAtendimento = aplicarFiltroGeralAtendimento;
   window.aplicarFiltroGeralMes = aplicarFiltroGeralMes;
   window.limparFiltrosGeral = limparFiltrosGeral;
+  window.irParaPaginaGeral = irParaPaginaGeral;
 
   window.abrirModalSaving = abrirModalSaving;
   window.fecharModalSaving = fecharModalSaving;
