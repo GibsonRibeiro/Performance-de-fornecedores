@@ -9,6 +9,7 @@
 
 const FILES = {
   geral: "./data/geral.csv",
+  historicoConsolidado: "./data/historico.csv",
   saving: "./data/saving.csv",
   indices: "./data/indices.csv",
   pesosPerfis: "./data/pesos-perfis-aluminio.csv",
@@ -16,7 +17,10 @@ const FILES = {
     "2026": "./data/geral.csv",
     "2025": "./data/2025.csv",
     "2024": "./data/2024.csv",
-    "2023": "./data/2023.csv"
+    "2023": "./data/2023.csv",
+    "2022": "./data/2022.csv",
+    "2021": "./data/2021.csv",
+    "2020": "./data/2020.csv"
   }
 };
 /* =========================
@@ -45,7 +49,7 @@ function getSupabaseClient(){
 ========================= */
 
 const ANO_PADRAO = "2026";
-const ANOS_HISTORICO = ["2026", "2025", "2024", "2023"];
+const ANOS_HISTORICO = ["2026", "2025", "2024", "2023", "2022", "2021", "2020"];
 const OPCAO_TODOS_ANOS = "Todos os anos";
 const META_SAVING_2026 = 0.05;
 const PESO_ENTREGAS_COMPRADOR = 0.90;
@@ -1508,15 +1512,39 @@ async function ensureGeralData(){
 
   const carregados = [];
 
-  for(const ano of ANOS_HISTORICO){
-    const path = FILES.historico[ano];
-    const required = ano === ANO_PADRAO;
+  carregados.push(...mapGeralRows(await loadCSV(FILES.geral), ANO_PADRAO));
 
+  // Uma exportação de 2020–2025 substitui os arquivos anuais antigos.
+  // O ano é o da Data Cadastro, nunca o nome do arquivo nem a data de entrega.
+  let historicoConsolidado = [];
+  try{
+    historicoConsolidado = await loadCSV(FILES.historicoConsolidado, false);
+  }catch(error){
+    console.warn("Histórico consolidado não carregado:", error.message);
+  }
+  const porAno = new Map();
+  if(historicoConsolidado.length){
+    historicoConsolidado.forEach(r => {
+      const ano = String(parseDateBR(get(r, ["Data Cadastro", "Data do Pedido", "Data Pedido"]))?.getFullYear() || "");
+      if(!ANOS_HISTORICO.includes(ano) || ano === ANO_PADRAO) return;
+      if(!porAno.has(ano)) porAno.set(ano, []);
+      porAno.get(ano).push(r);
+    });
+    if(porAno.size){
+      ANOS_HISTORICO.slice(1).forEach(ano => {
+        if(porAno.has(ano)) carregados.push(...mapGeralRows(porAno.get(ano), ano));
+      });
+    }else{
+      console.warn("historico.csv sem linhas válidas de 2020 a 2025; usando arquivos anuais.");
+    }
+  }
+
+  for(const ano of ANOS_HISTORICO.slice(1)){
+    if(porAno.has(ano)) continue;
     try{
-      const rows = await loadCSV(path, required);
+      const rows = await loadCSV(FILES.historico[ano], false);
       carregados.push(...mapGeralRows(rows, ano));
     }catch(error){
-      if(required) throw error;
       console.warn(`Histórico ${ano} não carregado:`, error.message);
     }
   }
@@ -2334,10 +2362,15 @@ function notaEntregaLinha(x, hoje = normalizeDate(new Date())){
   if(!limite || limite > hoje) return {tipo:"futuro"};
   const quantidadeEfetiva = x.quantidade - (x.quantidadeCancelada || 0);
   if(!(quantidadeEfetiva > 0)) return {tipo:"excluido"};
+  // Os históricos antigos não têm quantidades atendidas. É possível avaliar
+  // a última entrega das linhas concluídas, mas não pontuar suas parciais.
+  if(!x.temControleAtendimento && !x.entregue) return {tipo:"excluido"};
   const datas = x.datasRecebimento || [];
   if(datas.some(d => x.dataCadastroObj && d < x.dataCadastroObj)) return {tipo:"excluido"};
-  const fracao = Math.min(1, Math.max(0, x.quantidadeAtendida / quantidadeEfetiva));
-  const completo = x.quantidadeSaldo <= 0 && fracao >= 0.999;
+  const fracao = x.temControleAtendimento
+    ? Math.min(1, Math.max(0, x.quantidadeAtendida / quantidadeEfetiva)) : 1;
+  const completo = x.temControleAtendimento
+    ? x.quantidadeSaldo <= 0 && fracao >= 0.999 : x.entregue;
   if(completo && !x.dataRecebimentoObj) return {tipo:"excluido"};
   const termino = completo ? x.dataRecebimentoObj : hoje;
   const atraso = Math.max(0, diffDays(termino, limite) || 0);
@@ -2737,6 +2770,10 @@ function renderGeralContent(base){
 
   const leadTimePrevisto = calcularLeadTimePonderado(data, "leadTimePrevisto");
   const leadTimeRealizado = calcularLeadTimePonderado(data, "leadTimeRealizado");
+  const leadTimePrevistoComparavel = calcularLeadTimePonderado(
+    data.filter(x => x.entregue && Number.isFinite(x.leadTimeRealizado) && x.leadTimeRealizado >= 0),
+    "leadTimePrevisto"
+  );
   const totalPaginas = Math.max(1, Math.ceil(data.length / GERAL_POR_PAGINA));
   geralPagina = Math.min(Math.max(1, geralPagina), totalPaginas);
   const primeiraLinha = (geralPagina - 1) * GERAL_POR_PAGINA;
@@ -2840,7 +2877,7 @@ function renderGeralContent(base){
       </div>
     </section>
 
-    <div class="leadtime-note">Lead time em dias corridos. Previsto = previsão inicial − data do pedido; realizado = último recebimento − data do pedido (itens atendidos em plenitude). Média ponderada pela quantidade comprada, aplicada aos filtros. ${data.length && new Set(data.map(x => x.produto)).size > 1 ? "Há mais de um código no resultado: filtre um item antes de copiar uma referência para o cadastro." : "Confirme com Compras o prazo preferencial e a homologação antes de cadastrar."}</div>
+    <div class="leadtime-note">Lead time em dias corridos. Previsto = previsão inicial − data do pedido (todos os itens); realizado = último recebimento − data do pedido (somente itens concluídos). As duas médias dos cards têm bases diferentes.${leadTimePrevistoComparavel.dias !== null && leadTimeRealizado.dias !== null ? ` Nos mesmos itens concluídos: previsto ${leadTimeTexto(leadTimePrevistoComparavel)}, realizado ${leadTimeTexto(leadTimeRealizado)} (${(leadTimeRealizado.dias - leadTimePrevistoComparavel.dias) >= 0 ? "+" : ""}${(leadTimeRealizado.dias - leadTimePrevistoComparavel.dias).toLocaleString("pt-BR",{maximumFractionDigits:1})} d).` : ""} Médias ponderadas pela quantidade comprada, aplicadas aos filtros. ${data.length && new Set(data.map(x => x.produto)).size > 1 ? "Há mais de um código no resultado: filtre um item antes de copiar uma referência para o cadastro." : "Confirme com Compras o prazo preferencial e a homologação antes de cadastrar."}</div>
     ${renderPrazosPorFornecedor(data)}
 
     <section class="panel-grid">
@@ -2851,7 +2888,7 @@ function renderGeralContent(base){
 
       <div class="panel">
         <h2>Performance por comprador</h2>
-        <p class="score-caption">${anoNota === "2026" ? "Nota anual da carteira · entregas 90 pontos + Saving homologado 10 pontos." : "Nota da carteira no período selecionado · apenas entregas; meta de Saving definida para 2026."} Clique para entender. Filtros de item e fornecedor não alteram a nota anual do comprador.</p>
+        <p class="score-caption">${anoNota === "2026" ? "Nota anual da carteira · entregas 90 pontos + Saving homologado 10 pontos." : "Nota da carteira no período selecionado · apenas entregas; meta de Saving definida para 2026."} Clique para entender. Filtros de item e fornecedor não alteram a nota anual do comprador.${baseAnoNota.some(x => !x.temControleAtendimento) ? " Histórico antigo sem quantidades: apenas entregas concluídas são pontuadas até a importação completa." : ""}</p>
         ${performanceComprador.length ? performanceComprador.map(x => {
           return barraNota(x.nome, x.resumo, x.saving);
         }).join("") : `<div class="empty-state">Sem dados de entrega para o período.</div>`}
@@ -3597,7 +3634,7 @@ function renderFornecedoresContent(base){
       ${compactStat("Itens plenos", totalItensPlenos, "green")}
       ${compactStat("Itens avaliados", totalItensAvaliados, "blue")}
     </section>
-    <p class="score-caption">Nota de 0 a 100: itens com prazo inicial + 7 dias já vencido; 70% por item e 30% por valor. Clique na nota de cada fornecedor para ver a composição.</p>
+    <p class="score-caption">Nota de 0 a 100: itens com prazo inicial + 7 dias já vencido; 70% por item e 30% por valor. Clique na nota de cada fornecedor para ver a composição.${dataBase.some(x => !x.temControleAtendimento) ? " Histórico antigo sem quantidades: somente entregas concluídas são pontuadas." : ""}</p>
 
     <div class="section-heading">
       <div>
